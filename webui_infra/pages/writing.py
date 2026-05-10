@@ -11,7 +11,7 @@ import streamlit as st
 from pathlib import Path
 
 # ── 工具/状态（从 webui_infra，无循环依赖） ──────────────────────────────────
-from webui_infra.state import is_llm_running, set_llm_running, reset_chapter_buffers
+from webui_infra.state import is_llm_running, reset_chapter_buffers
 from webui_infra.components.keyboard import (
     apply_shortcut_to_state,
     render_keyboard_shortcuts,
@@ -24,7 +24,6 @@ from webui import (
     PROJECT_DIR,
     read_file, write_file, ch_str, parse_chapter_num, word_count, list_md,
     latest_chapter_text, chapter_state, chapter_status, prose_model_label, action_model_label,
-    render_chapter_status_card,
     _render_smart_action_panel,
     _render_writing_assist,
     _render_assist_candidate_adoption,
@@ -36,13 +35,7 @@ from webui import (
     apply_runtime_mode,
     run_writing_assist,
     extract_adoptable_assist_text,
-    run_beautify_assist_package,
-    run_hook_assist_package,
-    _md_editor,
-    _set_llm_running,
-    _is_llm_running,
     _start_llm_background_job,
-    _widget_key,
     _save_review,
 )
 
@@ -173,7 +166,7 @@ def _render_writing_toolbar(outlines: list[str], init_idx: int) -> str | None:
 def _render_style_mode_indicator(chapter_num: int) -> None:
     """写作工具栏下方：显示当前生效的风格档案、章节模式、节奏。"""
     from style_profiles import (
-        get_style_profile, resolve_style_profile_name, style_profile_options,
+        get_style_profile, resolve_style_profile_name,
     )
 
     profile_name = resolve_style_profile_name(PROJECT_DIR, chapter_num)
@@ -261,30 +254,24 @@ def _render_ai_autopilot(chapter_num: int, ch: str, mock_mode: bool, llm_lock: b
     disabled = llm_lock
     next_step = ACTION_LABELS.get(action, action)
 
-    col_ai, col_manual = st.columns([1.5, 1], gap="medium")
-
-    with col_ai:
-        checkpoint = _read_autopilot_checkpoint(chapter_num)
-        if checkpoint.get("last_status") in {"paused", "recovered"}:
-            st.caption(f"断点：{checkpoint.get('last_action', '')} · {checkpoint.get('last_message', '')[:90]}")
-        if st.button(
-            "AI 自动推进当前章",
-            type="primary",
-            use_container_width=True,
-            disabled=disabled,
-            key=f"writing_autopilot_{ch}",
-            help=f"下一步：{next_step}",
-        ):
-            _run_chapter_autopilot(chapter_num, mock_mode)
-            st.rerun()
-        if action == "edit_outline":
-            st.caption("下一步：AI 会先在本页补全章纲，再继续生成任务卡、场景和正文。")
-        else:
-            label = action_model_label(action, mock_mode)
-            st.caption(f"下一步：{next_step}{' · ' + label if label else ''}")
-
-    with col_manual:
-        _render_manual_actions(chapter_num, ch, flow, llm_lock)
+    checkpoint = _read_autopilot_checkpoint(chapter_num)
+    if checkpoint.get("last_status") in {"paused", "recovered"}:
+        st.caption(f"断点：{checkpoint.get('last_action', '')} · {checkpoint.get('last_message', '')[:90]}")
+    if st.button(
+        "AI 自动推进当前章",
+        type="primary",
+        use_container_width=True,
+        disabled=disabled,
+        key=f"writing_autopilot_{ch}",
+        help=f"下一步：{next_step}",
+    ):
+        _run_chapter_autopilot(chapter_num, mock_mode)
+        st.rerun()
+    if action == "edit_outline":
+        st.caption("下一步：AI 会先在本页补全章纲，再继续生成任务卡、场景和正文。")
+    else:
+        label = action_model_label(action, mock_mode)
+        st.caption(f"下一步：{next_step}{' · ' + label if label else ''}")
 
 
 def _render_manual_actions(chapter_num: int, ch: str, flow: dict, llm_lock: bool) -> None:
@@ -869,15 +856,6 @@ def _execute_autopilot_action(chapter_num: int, action: str, rec: dict, mock: bo
 
         run_audit_only(chapter_num, mock=mock)
         messages.append("逻辑审计已完成")
-    elif action == "ai_check":
-        source, text = latest_chapter_text(ch)
-        if not text:
-            raise RuntimeError("找不到可检查稿件")
-        from llm_router import LLMRouter
-
-        result = LLMRouter(project_dir=PROJECT_DIR).check_ai_flavor_local(text)
-        write_file(f"04_审核日志/第{ch}章_AI味检查.md", result)
-        messages.append(f"AI 味检查已完成：{source}")
     elif action == "reader_mirror":
         source, text = latest_chapter_text(ch)
         if not text:
@@ -887,15 +865,6 @@ def _execute_autopilot_action(chapter_num: int, action: str, rec: dict, mock: bo
         result = LLMRouter(project_dir=PROJECT_DIR).reader_mirror(text, read_file("03_滚动记忆/最近摘要.md"))
         write_file(f"04_审核日志/第{ch}章_读者镜像.md", result)
         messages.append(f"读者镜像已完成：{source}")
-    elif action == "deep_check":
-        source, text = latest_chapter_text(ch)
-        if not text:
-            raise RuntimeError("找不到可检查稿件")
-        from llm_router import LLMRouter
-
-        result = LLMRouter(project_dir=PROJECT_DIR).deep_check(text, read_file("03_滚动记忆/最近摘要.md"))
-        write_file(f"04_审核日志/第{ch}章_深度检查.md", result)
-        messages.append(f"深度检查已完成：{source}")
     elif action == "quality_diag":
         source, text = latest_chapter_text(ch)
         if not text:
@@ -904,6 +873,94 @@ def _execute_autopilot_action(chapter_num: int, action: str, rec: dict, mock: bo
 
         _, _, report = write_quality_diagnostics(PROJECT_DIR, chapter_num, text, source)
         messages.append(f"质量诊断已完成：{report['grade']}")
+    elif action == "drama_diag":
+        source, text = latest_chapter_text(ch)
+        if not text:
+            raise RuntimeError("找不到可诊断稿件")
+        from dramatic_arc_diagnostics import (
+            build_character_briefs,
+            diagnose_chapter_drama,
+            write_diagnostics as write_drama_diag,
+        )
+        from llm_router import LLMRouter
+        from structured_store import read_task_card
+
+        card = read_task_card(PROJECT_DIR, chapter_num)
+        diag = diagnose_chapter_drama(
+            PROJECT_DIR,
+            chapter_num,
+            text,
+            task_card_json=card.model_dump_json(indent=2) if card else "",
+            character_briefs=build_character_briefs(PROJECT_DIR, text),
+            llm=LLMRouter(project_dir=PROJECT_DIR),
+        )
+        write_drama_diag(PROJECT_DIR, diag)
+        messages.append(f"戏剧诊断已完成（总分 {diag.overall_drama_score}）")
+    elif action == "literary_critic":
+        source, text = latest_chapter_text(ch)
+        if not text:
+            raise RuntimeError("找不到可批评稿件")
+        from literary_critic import analyze_literary_view, write_literary_view
+        from llm_router import LLMRouter
+        from structured_store import read_task_card
+
+        card = read_task_card(PROJECT_DIR, chapter_num)
+        view = analyze_literary_view(
+            PROJECT_DIR,
+            chapter_num,
+            text,
+            task_card_json=card.model_dump_json(indent=2) if card else "",
+            llm=LLMRouter(project_dir=PROJECT_DIR),
+        )
+        write_literary_view(PROJECT_DIR, view)
+        messages.append("文学批评已完成（不打分，不制造必改项）")
+    elif action == "style_court":
+        from literary_critic import read_literary_view
+        from style_court import adjudicate, write_style_court
+        from structured_store import read_task_card
+
+        quality_report = json.loads(read_file(f"04_审核日志/第{ch}章_质量诊断.json") or "{}")
+        literary = read_literary_view(PROJECT_DIR, chapter_num)
+        if literary is None:
+            raise RuntimeError("先生成文学批评再运行风格法庭。")
+        decision = adjudicate(
+            PROJECT_DIR,
+            chapter_num,
+            quality_report=quality_report,
+            literary_view=literary,
+            task_card=read_task_card(PROJECT_DIR, chapter_num),
+        )
+        write_style_court(PROJECT_DIR, decision)
+        messages.append(f"风格法庭已完成：confirmed={len(decision.confirmed_issues)} / contested={len(decision.contested_issues)}")
+    elif action == "voice_diag":
+        from voice_diagnostics import analyze_character_voices, write_voice_diagnostics
+
+        fp = analyze_character_voices(PROJECT_DIR, chapter_num)
+        write_voice_diagnostics(PROJECT_DIR, fp)
+        messages.append("角色声音诊断已完成")
+    elif action == "editor_memo":
+        source, text = latest_chapter_text(ch)
+        if not text:
+            raise RuntimeError("找不到可备忘的稿件")
+        from dramatic_arc_diagnostics import read_diagnostics as read_drama_diag
+        from editor_memo import synthesize_memo, write_memo
+        from literary_critic import read_literary_view
+        from style_court import read_style_court
+
+        quality_report = json.loads(read_file(f"04_审核日志/第{ch}章_质量诊断.json") or "{}")
+        memo = synthesize_memo(
+            PROJECT_DIR,
+            chapter_num,
+            text,
+            audit_text=read_file(f"04_审核日志/第{ch}章_审计.md"),
+            reader_mirror_text=read_file(f"04_审核日志/第{ch}章_读者镜像.md"),
+            quality_report=quality_report or None,
+            drama_diag=read_drama_diag(PROJECT_DIR, chapter_num),
+            literary_view=read_literary_view(PROJECT_DIR, chapter_num),
+            style_court_decision=read_style_court(PROJECT_DIR, chapter_num),
+        )
+        write_memo(PROJECT_DIR, memo)
+        messages.append(f"编辑备忘录已完成（必改项 {len(memo.top_3_must_fix)} 条）")
     elif action == "feedback_revise":
         from novel_pipeline import run_revise_from_feedback
 
@@ -938,9 +995,6 @@ def _render_command_panel(
 ) -> None:
     with st.expander("手工控制台（备用）", expanded=True):
         _render_chapter_mini_status(chapter_num)
-
-        with st.expander("快捷操作", expanded=False):
-            _render_main_actions(chapter_num, ch, state, mock_mode, llm_lock)
 
         with st.expander("技巧焦点", expanded=False):
             _render_technique_selector(chapter_num)
@@ -1255,8 +1309,8 @@ def _render_main_actions(
     if do_pipeline:
         _run_pipeline(
             chapter_num,
-            generate=True, audit=True, ai_check=True,
-            reader_mirror=True, deep_check=True, quality=True,
+            generate=True, audit=True,
+            reader_mirror=True, quality=True,
             mock=mock_mode,
         )
         st.rerun()
@@ -1301,15 +1355,11 @@ def _render_advanced_actions(
     col_a, col_b, col_c = st.columns(3)
     any_dis = not has_any or llm_lock
     col_a.button("逻辑审计", use_container_width=True, disabled=any_dis, key=f"w3adv_audit_{ch}",
-                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, True, False, False, False, False, m))
-    col_a.button("AI 味检查", use_container_width=True, disabled=any_dis, key=f"w3adv_ai_{ch}",
-                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, False, True, False, False, False, m))
+                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, True, False, False, m))
     col_b.button("读者镜像", use_container_width=True, disabled=any_dis, key=f"w3adv_mirror_{ch}",
-                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, False, False, True, False, False, m))
-    col_b.button("深度检查", use_container_width=True, disabled=any_dis, key=f"w3adv_deep_{ch}",
-                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, False, False, False, True, False, m))
+                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, False, True, False, m))
     col_c.button("质量诊断", use_container_width=True, disabled=any_dis, key=f"w3adv_quality_{ch}",
-                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, False, False, False, False, True, m))
+                 on_click=lambda m=mock_mode: _run_pipeline(chapter_num, False, False, False, True, m))
 
     st.divider()
     st.subheader("定稿 + 长期记忆")
@@ -2001,8 +2051,7 @@ def _render_memo_view(
     """渲染编辑备忘录主视图：top-3 行动项 + 评分摘要 + 就绪标志。"""
     scores = memo.get("score_summary", {})
     if scores:
-        label_map = {"drama": "戏剧", "quality": "质量", "audit": "审计",
-                      "ai_flavor": "AI味", "reader": "读者", "deep": "深度"}
+        label_map = {"drama": "戏剧", "quality": "质量", "audit": "审计", "reader": "读者"}
         cols = st.columns(len(scores))
         for idx, (key, val) in enumerate(scores.items()):
             cols[idx].metric(label_map.get(key, key), val)
@@ -2259,12 +2308,10 @@ def _run_targeted_revision(chapter_num: int, target: str, mock: bool) -> None:
 
 
 def _render_sub_reports(ch: str) -> None:
-    """折叠区：四种审核报告。"""
-    r1, r2, r3, r4 = st.tabs(["逻辑审计", "AI味检查", "读者镜像", "深度检查"])
+    """折叠区：审核报告。"""
+    r1, r2 = st.tabs(["逻辑审计", "读者镜像"])
     _report_tab(r1, f"04_审核日志/第{ch}章_审计.md", f"04_审核日志/第{ch}章_复审.md")
-    _report_tab(r2, f"04_审核日志/第{ch}章_AI味检查.md")
-    _report_tab(r3, f"04_审核日志/第{ch}章_读者镜像.md")
-    _report_tab(r4, f"04_审核日志/第{ch}章_深度检查.md")
+    _report_tab(r2, f"04_审核日志/第{ch}章_读者镜像.md")
 
 
 def _report_tab(tab_ctx, primary_rel: str, secondary_rel: str = "") -> None:

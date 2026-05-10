@@ -33,6 +33,13 @@ except Exception:  # pragma: no cover - optional dependency guard
 PROJECT_DIR = Path(__file__).resolve().parent
 if load_dotenv:
     load_dotenv(PROJECT_DIR / ".env")
+    try:
+        from dotenv import dotenv_values
+        for _k, _v in (dotenv_values(PROJECT_DIR / ".env") or {}).items():
+            if _v and not os.getenv(_k):
+                os.environ[_k] = _v
+    except Exception:
+        pass
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")

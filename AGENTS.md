@@ -211,3 +211,4 @@ streamlit run webui.py
 | 2026-05-06 | V5.0-beta1 单栏稿纸、页边批注、快捷键桥和卷轴健康图：webui_infra/components/* + writing.py 默认聚焦正文。 |
 | 2026-05-06 | V5.0-beta2 文学批评层与风格法庭：LiteraryView、文学批评 prompt、style_court、CLI/WebUI/EditorMemo 接入，保护氛围和内省章节。 |
 | 2026-05-07 | V5.0-UX 收口：删除旧测试第001章；inline diff 升级为块级采用/保留；主要 LLM WebUI 动作后台任务化；写作页 AI 自动推进支持章纲审查/改稿和断点续接；设置页按启用供应商隐藏并紧凑排布；413 项测试和 Streamlit 烟测通过。 |
+| 2026-05-10 | V5.0 流水线清收：移除 ai_check/deep_check（与 literary_critic 矛盾）；改稿门控收紧为仅硬伤（forbidden/任务卡未落地/error 级）触发；drama_diag 保护 interior/atmosphere/bridge 模式；reader_mirror 降级为参考层；前后台16处 bug 修复（含5个崩溃按钮传参、225行死代码、editor_memo API沉渣清理）。 |

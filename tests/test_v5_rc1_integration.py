@@ -18,7 +18,7 @@ class CrossModuleDataFlowTests(unittest.TestCase):
     def test_quality_to_style_court_to_editor_memo_full_flow(self):
         """完整链路：质量诊断 → 风格法庭裁决 → 编辑备忘录合并 reservations"""
         from quality_diagnostics import write_writer_override, read_writer_overrides, apply_writer_overrides
-        from style_court import adjudicate, contested_to_reservations, _active_findings as sc_active
+        from style_court import adjudicate, contested_to_reservations
         from editor_memo import _merge_reservations
         from novel_schemas import LiteraryView
 
@@ -386,7 +386,6 @@ class NovelPipelineIntegrationTests(unittest.TestCase):
 
     def test_pipeline_imports_do_not_crash(self):
         """验证 pipeline 导入所有依赖不崩溃"""
-        import sys
         # 临时重定向以避免 mock 警告
         try:
             from novel_pipeline import (

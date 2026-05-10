@@ -22,7 +22,6 @@ def render_adjudication_panel(
     if not chapter_num or not findings:
         return
 
-    from quality_diagnostics import writer_overrides_path
 
     with st.container(border=True):
         st.markdown(f"**{source_label}**（作家裁决）")

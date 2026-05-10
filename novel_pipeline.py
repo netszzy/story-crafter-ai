@@ -15,7 +15,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -312,27 +311,17 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
     draft_path = save(f"02_正文/第{ch}章_草稿.md", draft)
     print(f"      草稿已保存 → {draft_path.relative_to(PROJECT_DIR)}（{word_count_zh(draft)}字）")
 
-    print("[2/6] 逻辑审计...")
+    print("[2/5] 逻辑审计...")
     audit_result = llm.audit_logic(draft, audit_reference, recent_summary)
     audit_path = save(f"04_审核日志/第{ch}章_审计.md", audit_result)
     review_json_path = write_review_json(PROJECT_DIR, chapter_num, audit_result, getattr(llm, "DEEPSEEK_MODEL", ""))
     print(f"      审计报告已保存 → {audit_path.relative_to(PROJECT_DIR)}")
     print(f"      审计 JSON 已保存 → {review_json_path.relative_to(PROJECT_DIR)}")
 
-    print("[3/6] AI 味检查...")
-    ai_flavor = llm.check_ai_flavor_local(draft)
-    ai_path = save(f"04_审核日志/第{ch}章_AI味检查.md", ai_flavor)
-    print(f"      AI味检查已保存 → {ai_path.relative_to(PROJECT_DIR)}")
-
-    print("[3.5/6] 读者镜像检查...")
+    print("[3/5] 读者镜像检查（参考层）...")
     reader_mirror = llm.reader_mirror(draft, recent_summary)
     mirror_path = save(f"04_审核日志/第{ch}章_读者镜像.md", reader_mirror)
     print(f"      读者镜像已保存 → {mirror_path.relative_to(PROJECT_DIR)}")
-
-    print("[3.7/6] 深度检查...")
-    deep_check = llm.deep_check(draft, recent_summary)
-    deep_path = save(f"04_审核日志/第{ch}章_深度检查.md", deep_check)
-    print(f"      深度检查已保存 → {deep_path.relative_to(PROJECT_DIR)}")
 
     final_draft = draft
     final_source_rel = f"02_正文/第{ch}章_草稿.md"
@@ -341,15 +330,19 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
     needs_quality_revision = quality_needs_revision(draft_quality)
     if needs_audit_revision or needs_quality_revision:
         reason = "审计发现问题" if needs_audit_revision else "质量诊断建议打磨"
-        print(f"[4/6] {reason}，生成修订稿...")
+        print(f"[4/5] {reason}，生成修订稿...")
         quality_brief = render_revision_brief(draft_quality)
         revision_prompt = (
             f"以下是逻辑审计发现的问题：\n\n{audit_result}\n\n"
-            f"以下是 AI 味检查结果：\n\n{ai_flavor}\n\n"
-            f"以下是读者视角反馈：\n\n{reader_mirror}\n\n"
-            f"以下是深度检查（情感冲击/主题推进/人物弧光）：\n\n{deep_check}\n\n"
+            f"以下是读者视角反馈（参考层，不强制必改）：\n\n{reader_mirror}\n\n"
             f"以下是章节质量诊断给出的改稿指令：\n\n{quality_brief}\n\n"
-            f"请修订以下章节，修正所有指出的问题，保持文风、既定剧情和任务卡目标不变：\n\n{draft}"
+            f"请修订以下章节，修正反馈中指出的问题，保持文风、既定剧情和任务卡目标不变。\n\n"
+            f"【硬约束 · 保留质感】\n"
+            f"- 原文中的留白、停顿、未说完的话、未解状态必须保留，不要为了'让段落完整'而补全，"
+            f"不要为了'让信息更清楚'而展开解释。\n"
+            f"- 不要为了过冲突信号、主动性、感官词等指标而强行加冲突词、动作或形容词。\n"
+            f"- 改稿只动反馈中点名的局部，其他段落原样保留。\n\n"
+            f"原文：\n\n{draft}"
         )
         final_draft = llm.revise_chapter(
             system_prompt, full_context, revision_prompt, task_card_text=task_card_block
@@ -374,7 +367,7 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
         print(f"      复审报告已保存 → {reaudit_path.relative_to(PROJECT_DIR)}")
         print(f"      复审 JSON 已保存 → {reaudit_json_path.relative_to(PROJECT_DIR)}")
     else:
-        print("[4/6] 审计和质量诊断未发现明显问题，跳过自动修订")
+        print("[4/5] 审计和质量诊断未发现明显问题，跳过自动修订")
 
     print("      章节质量诊断...")
     quality_md, quality_json, quality_report = write_quality_diagnostics(
@@ -389,8 +382,13 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
     )
 
     diag = None
+    chapter_mode = (task_card.chapter_mode or "").lower() if task_card else ""
+    drama_protected_modes = {"interior", "atmosphere", "bridge"}
+    drama_skipped_by_mode = chapter_mode in drama_protected_modes
     if skip_drama_diagnose:
         print("      已跳过戏剧诊断（--skip-drama-diagnose）")
+    elif drama_skipped_by_mode:
+        print(f"      跳过戏剧诊断（chapter_mode='{chapter_mode}'，保护氛围/留白模式不必量化戏剧张力）")
     else:
         print("      戏剧结构诊断...")
         diag = diagnose_chapter_drama(
@@ -441,8 +439,8 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
     from editor_memo import synthesize_memo as _synth, write_memo as _write_memo
     _memo = _synth(
         PROJECT_DIR, chapter_num, final_draft,
-        audit_text=audit_result, ai_flavor_text=ai_flavor,
-        reader_mirror_text=reader_mirror, deep_check_text=deep_check,
+        audit_text=audit_result,
+        reader_mirror_text=reader_mirror,
         quality_report=quality_report, drama_diag=diag,
         literary_view=literary_view, style_court_decision=court_decision,
         llm=llm,
@@ -450,7 +448,7 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
     _memo_md, _memo_json = _write_memo(PROJECT_DIR, _memo)
     print(f"      编辑备忘录已保存 → {_memo_md.relative_to(PROJECT_DIR)} / {_memo_json.relative_to(PROJECT_DIR)}")
 
-    print("[5/6] 生成草稿摘要（不写入滚动记忆/RAG）...")
+    print("[5/5] 生成草稿摘要（不写入滚动记忆/RAG）...")
     summary = llm.summarize_local(final_draft)
     summary_md, summary_json = write_draft_summary(chapter_num, summary, final_source_rel)
     print(
@@ -458,13 +456,13 @@ def run_full(chapter_num: int, mock: bool = False, skip_drama_diagnose: bool = F
         f"{summary_json.relative_to(PROJECT_DIR)}"
     )
 
-    print("[6/6] 等待人工定稿；长期记忆和 RAG 将在 --finalize --yes 时更新")
+    print("      等待人工定稿；长期记忆和 RAG 将在 --finalize --yes 时更新")
 
     print(f"\n{'=' * 55}")
     print(f"第{chapter_num}章流水线完成。")
     print(f"草稿：02_正文/第{ch}章_草稿.md")
     print(f"审计：04_审核日志/第{ch}章_审计.md")
-    print(f"下一步：人工精修后运行 --finalize --yes 更新四项滚动记忆。")
+    print("下一步：人工精修后运行 --finalize --yes 更新四项滚动记忆。")
     print(f"{'=' * 55}\n")
 
 
@@ -634,14 +632,13 @@ def run_revise_from_feedback(chapter_num: int, mock: bool = False) -> None:
     from dramatic_arc_diagnostics import (
         build_character_briefs,
         diagnose_chapter_drama,
-        diagnostics_to_revision_brief,
         read_diagnostics,
         write_diagnostics,
     )
     from literary_critic import analyze_literary_view, write_literary_view
     from llm_router import LLMRouter
     from prompt_assembly import build_chapter_context, render_prose_system_prompt, render_task_card_block
-    from quality_diagnostics import analyze_chapter_quality, render_revision_brief, write_quality_diagnostics
+    from quality_diagnostics import analyze_chapter_quality, write_quality_diagnostics
     from rag_engine import NovelRAG
     from style_court import adjudicate, write_style_court
     from structured_store import read_task_card, write_review_json_for_source
@@ -666,11 +663,11 @@ def run_revise_from_feedback(chapter_num: int, mock: bool = False) -> None:
     card = read_task_card(PROJECT_DIR, chapter_num)
 
     audit_text = load(f"04_审核日志/第{ch}章_审计.md")
-    ai_text = load(f"04_审核日志/第{ch}章_AI味检查.md")
     mirror_text = load(f"04_审核日志/第{ch}章_读者镜像.md")
-    deep_text = load(f"04_审核日志/第{ch}章_深度检查.md")
+    drama_protected_modes = {"interior", "atmosphere", "bridge"}
+    chapter_mode_r = (card.chapter_mode or "").lower() if card else ""
     drama_diag = read_diagnostics(PROJECT_DIR, chapter_num)
-    if drama_diag is None:
+    if drama_diag is None and chapter_mode_r not in drama_protected_modes:
         drama_diag = diagnose_chapter_drama(
             PROJECT_DIR,
             chapter_num,
@@ -685,6 +682,8 @@ def run_revise_from_feedback(chapter_num: int, mock: bool = False) -> None:
         if added:
             print(f"[样本池] 从第{ch}章入池 {added} 条样本。")
         print(f"[戏剧诊断] 已补生成第{ch}章戏剧诊断，作为改稿最高优先级输入。")
+    elif chapter_mode_r in drama_protected_modes:
+        print(f"      跳过戏剧诊断（chapter_mode='{chapter_mode_r}'，保护氛围/留白模式）")
     quality_report = analyze_chapter_quality(PROJECT_DIR, chapter_num, source_text, source_rel)
     literary_view = analyze_literary_view(
         PROJECT_DIR,
@@ -700,8 +699,8 @@ def run_revise_from_feedback(chapter_num: int, mock: bool = False) -> None:
     from editor_memo import synthesize_memo as _synth, memo_to_revision_prompt as _memo_prompt, write_memo as _write_memo
     _memo = _synth(
         PROJECT_DIR, chapter_num, source_text,
-        audit_text=audit_text, ai_flavor_text=ai_text,
-        reader_mirror_text=mirror_text, deep_check_text=deep_text,
+        audit_text=audit_text,
+        reader_mirror_text=mirror_text,
         quality_report=quality_report, drama_diag=drama_diag,
         literary_view=literary_view, style_court_decision=court_decision,
         llm=llm,

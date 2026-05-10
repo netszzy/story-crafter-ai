@@ -16,3 +16,8 @@ AI审查缓存/
 *.sqlite
 *.db
 outputs/
+
+.claude/
+.workbuddy/
+github_export/
+voice_github_export/

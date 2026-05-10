@@ -1179,13 +1179,21 @@ def render_quality_markdown(report: dict[str, Any]) -> str:
 
 
 def quality_needs_revision(report: dict[str, Any], threshold: int = 78) -> bool:
-    if int(report.get("score", 100)) < threshold:
-        return True
+    # 只在"硬伤"出现时触发改稿：forbidden 命中、任务卡核心事件未落地、error 级问题。
+    # 总分低、章末钩子偏弱、文气偏薄等品味问题不再自动触发——避免模型为了过指标妥协文字质感。
     findings = _active_findings(report.get("findings", []))
     if any(item.get("level") == "error" for item in findings):
         return True
-    risky_items = {"章末钩子偏弱", "任务卡对齐不足", "触碰任务卡禁止事项"}
-    return any(item.get("item") in risky_items for item in findings)
+    risky_items = {"任务卡对齐不足", "触碰任务卡禁止事项"}
+    if any(item.get("item") in risky_items for item in findings):
+        return True
+    alignment = report.get("task_card_alignment") or {}
+    if alignment.get("forbidden_hits"):
+        return True
+    checks = alignment.get("checks") or []
+    if any(check.get("covered") is False for check in checks):
+        return True
+    return False
 
 
 CHECKLIST_ACTIONS = {
@@ -1449,7 +1457,7 @@ def render_revision_brief(report: dict[str, Any], threshold: int = 78) -> str:
     alignment = report.get("task_card_alignment", {})
     findings = _active_findings(report.get("findings", []))
     lines = [
-        f"## 质量诊断改稿指令（V1.9）",
+        "## 质量诊断改稿指令（V1.9）",
         f"- 当前评分：{report.get('score', 0)} / 100（{report.get('grade', '未评级')}），目标不低于 {threshold}。",
         *([f"- 评分说明：{report.get('score_caveat')}"] if report.get("score_caveat") else []),
         f"- 对白占比：{float(metrics.get('dialogue_ratio', 0)):.1%}；平均句长：{metrics.get('avg_sentence_zh_chars', 0)}；句长波动：{metrics.get('sentence_length_stdev', 0)}。",

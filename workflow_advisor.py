@@ -27,10 +27,13 @@ ACTION_LABELS = {
     "assemble_scenes": "合并场景草稿",
     "full_pipeline": "运行完整流水线",
     "audit": "运行逻辑审计",
-    "ai_check": "运行 AI 味检查",
     "reader_mirror": "运行读者镜像",
-    "deep_check": "运行深度检查",
     "quality_diag": "运行章节质量诊断",
+    "drama_diag": "运行戏剧结构诊断",
+    "literary_critic": "运行文学批评",
+    "style_court": "运行风格法庭裁决",
+    "voice_diag": "运行角色声音诊断",
+    "editor_memo": "生成编辑备忘录",
     "feedback_revise": "按反馈生成修订稿",
     "save_final": "保存为定稿草案",
     "finalize_memory": "定稿并更新记忆",
@@ -144,10 +147,13 @@ def chapter_flow(project_dir: Path, chapter_num: int) -> dict:
     has_revised = bool(_read(project_dir / "02_正文" / f"第{ch}章_修订稿.md").strip())
     has_final = bool(_read(project_dir / "02_正文" / f"第{ch}章_定稿.md").strip())
     has_audit = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_审计.md").strip())
-    has_ai_check = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_AI味检查.md").strip())
     has_reader_mirror = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_读者镜像.md").strip())
-    has_deep_check = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_深度检查.md").strip())
     has_quality_diag = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_质量诊断.md").strip())
+    has_drama_diag = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_戏剧诊断.md").strip())
+    has_literary = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_文学批评.md").strip())
+    has_style_court = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_风格法庭.md").strip())
+    has_voice_diag = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_声音诊断.md").strip())
+    has_editor_memo = bool(_read(project_dir / "04_审核日志" / f"第{ch}章_编辑备忘录.md").strip())
     quality_report = _read_json(project_dir / "04_审核日志" / f"第{ch}章_质量诊断.json")
     memory_updated = has_final and f"auto-chapter-{ch}" in _read(project_dir / "03_滚动记忆" / "全局摘要.md")
     recommendation = recommend_action(
@@ -162,10 +168,13 @@ def chapter_flow(project_dir: Path, chapter_num: int) -> dict:
         has_revised=has_revised,
         has_final=has_final,
         has_audit=has_audit,
-        has_ai_check=has_ai_check,
         has_reader_mirror=has_reader_mirror,
-        has_deep_check=has_deep_check,
         has_quality_diag=has_quality_diag,
+        has_drama_diag=has_drama_diag,
+        has_literary=has_literary,
+        has_style_court=has_style_court,
+        has_voice_diag=has_voice_diag,
+        has_editor_memo=has_editor_memo,
         quality_report=quality_report,
         memory_updated=memory_updated,
     )
@@ -187,10 +196,13 @@ def chapter_flow(project_dir: Path, chapter_num: int) -> dict:
             "outline_improved": outline_review.get("improved", False),
             "revised": has_revised,
             "audit": has_audit,
-            "ai_check": has_ai_check,
             "reader_mirror": has_reader_mirror,
-            "deep_check": has_deep_check,
             "quality_diag": has_quality_diag,
+            "drama_diag": has_drama_diag,
+            "literary": has_literary,
+            "style_court": has_style_court,
+            "voice_diag": has_voice_diag,
+            "editor_memo": has_editor_memo,
             "final": has_final,
             "memory_updated": memory_updated,
         },
@@ -203,10 +215,13 @@ def chapter_flow(project_dir: Path, chapter_num: int) -> dict:
             scene_summary,
             has_draft,
             has_audit,
-            has_ai_check,
             has_reader_mirror,
-            has_deep_check,
             has_quality_diag,
+            has_drama_diag,
+            has_literary,
+            has_style_court,
+            has_voice_diag,
+            has_editor_memo,
             has_revised,
             has_final,
             memory_updated,
@@ -228,12 +243,15 @@ def recommend_action(
     has_revised: bool,
     has_final: bool,
     has_audit: bool,
-    has_ai_check: bool,
     has_reader_mirror: bool,
-    has_deep_check: bool,
     has_quality_diag: bool,
-    quality_report: dict,
-    memory_updated: bool,
+    has_drama_diag: bool = False,
+    has_literary: bool = False,
+    has_style_court: bool = False,
+    has_voice_diag: bool = False,
+    has_editor_memo: bool = False,
+    quality_report: dict = None,
+    memory_updated: bool = False,
 ) -> dict:
     if not outline.strip() or placeholders:
         return _recommend("edit_outline", "blocked", "章纲缺失或仍有占位符，先补完可执行信息。")
@@ -277,16 +295,47 @@ def recommend_action(
         return _recommend("full_pipeline", "action", "没有草稿；可以直接运行完整流水线生成章节稿。")
     if not has_audit:
         return _recommend("audit", "action", "草稿已有，下一步做逻辑审计。")
-    if not has_ai_check:
-        return _recommend("ai_check", "action", "审计后补 AI 味检查，方便后续修订。")
     if not has_reader_mirror:
-        return _recommend("reader_mirror", "action", "从目标读者视角检查追看欲、情感共振和类型卖点。")
-    if not has_deep_check:
-        return _recommend("deep_check", "action", "补深度检查，评估情感冲击、主题推进和人物弧光。")
+        return _recommend("reader_mirror", "action", "从目标读者视角检查追看欲、情感共振和类型卖点（参考层）。")
     if not has_quality_diag:
         return _recommend("quality_diag", "action", "补一份本地章节质量诊断，检查节奏、对白、套话和任务卡对齐。")
+    # 戏剧诊断对推进型章节有用，但 interior / atmosphere / bridge 模式（保护氛围/留白）
+    # 跑它会反向激励——和 style_court.PROTECTED_MODES 保持一致。
+    chapter_mode = str(task_card.get("chapter_mode", "") or "").lower()
+    drama_protected_modes = {"interior", "atmosphere", "bridge"}
+    if not has_drama_diag and chapter_mode not in drama_protected_modes:
+        return _recommend(
+            "drama_diag",
+            "action",
+            "补充戏剧结构诊断（压力曲线 / 人物弧光 / 画面可视性）。"
+            f"interior / atmosphere / bridge 模式会自动跳过；当前模式：{chapter_mode or 'plot'}。",
+        )
+    if not has_literary:
+        return _recommend(
+            "literary_critic",
+            "action",
+            "运行文学批评：观察可被记住的瞬间、未说之语、自我欺骗，保护工程诊断可能误伤的克制与氛围。",
+        )
+    if not has_style_court:
+        return _recommend(
+            "style_court",
+            "action",
+            "运行风格法庭：把工程指标与文学批评的冲突分流为必改与可争议，避免量化指标抹平人味。",
+        )
+    if not has_voice_diag:
+        return _recommend("voice_diag", "action", "运行角色声音诊断：检查角色对白指纹是否区分得开。")
+    if not has_editor_memo:
+        return _recommend(
+            "editor_memo",
+            "action",
+            "综合所有诊断生成编辑备忘录（P0/P1/P2 必改项 + 改稿约束）。",
+        )
     if not has_revised and not has_final and _quality_report_needs_revision(quality_report):
-        return _recommend("feedback_revise", "action", "质量诊断显示仍需打磨，按审计、AI味和诊断合成反馈生成修订稿。")
+        return _recommend(
+            "feedback_revise",
+            "action",
+            "质量诊断显示存在硬伤（任务卡偏离 / forbidden 命中），按编辑备忘录生成修订稿。",
+        )
     if not has_final and (has_revised or has_draft):
         return _recommend("save_final", "action", "把当前稿保存为定稿草案，然后在精修区人工打磨。")
     if has_final and not memory_updated:
@@ -310,13 +359,23 @@ def scan_outline_placeholders(project_dir: Path, chapter_num: int) -> list[dict]
     ch = f"{chapter_num:03d}"
     rel = f"01_大纲/章纲/第{ch}章.md"
     text = _read(project_dir / rel)
-    patterns = re.compile(r"主角名|章节标题|故事第X天|待补充|在此填写|请替换")
+    # 占位符模式：必须是【...】包裹的特定词，或单独出现的占位词（排除掉带冒号的标签）
+    patterns = re.compile(r"(?:主角名|章节标题|故事第X天|待补充|在此填写|请替换)(?!\s*[：:])")
     bracket_tokens = ["角色名", "章节标题", "主角名", "填写", "替换", "X", "Y"]
     findings = []
     for line_no, line in enumerate(text.splitlines(), start=1):
+        # 检查【...】形式
         bracket_hits = re.findall(r"【([^】]{0,40})】", line)
         has_bracket_placeholder = any(any(token in hit for token in bracket_tokens) for hit in bracket_hits)
+        
+        # 检查裸词形式，但排除掉章节标题等标签行（通过负向先行断言实现，或在此显式排除）
         if patterns.search(line) or has_bracket_placeholder:
+            # 进一步排除：如果行内包含有效内容（冒号后有非占位符的实质字符），则不视为占位符
+            placeholder_words = ["待补充", "在此填写", "请替换", "主角名", "章节标题", "故事第X天", "角色名"]
+            if "：" in line or ":" in line:
+                parts = re.split(r'[：:]', line, 1)
+                if len(parts) > 1 and parts[1].strip() and not any(token in parts[1] for token in placeholder_words):
+                    continue
             findings.append({"file": rel, "line": line_no, "text": line.strip()[:160]})
     return findings
 
@@ -333,16 +392,26 @@ def _recommend(action: str, severity: str, detail: str, **extra: object) -> dict
 
 
 def _quality_report_needs_revision(report: dict) -> bool:
+    # 直接复用 quality_diagnostics 的语义，避免本地副本和真源逻辑不一致。
+    # 当前真源只在硬伤（forbidden / 任务卡核心未落地 / error 级）触发改稿，
+    # 不再因总分低或品味问题（钩子偏弱、文气偏薄）自动改稿。
     if not report:
         return False
     try:
-        score = int(report.get("score", 100))
-    except (TypeError, ValueError):
-        score = 100
-    if score < 78:
-        return True
-    risky = {"触碰任务卡禁止事项", "章末钩子偏弱", "任务卡对齐不足"}
-    return any(item.get("item") in risky or item.get("level") == "error" for item in report.get("findings", []))
+        from quality_diagnostics import quality_needs_revision
+        return quality_needs_revision(report)
+    except Exception:
+        # 兜底：保留与真源等价的硬伤判断
+        risky = {"触碰任务卡禁止事项", "任务卡对齐不足"}
+        for item in report.get("findings", []):
+            if item.get("item") in risky or item.get("level") == "error":
+                return True
+        alignment = report.get("task_card_alignment") or {}
+        if alignment.get("forbidden_hits"):
+            return True
+        if any(check.get("covered") is False for check in alignment.get("checks") or []):
+            return True
+        return False
 
 
 def _steps(
@@ -354,14 +423,20 @@ def _steps(
     scene_summary: dict,
     has_draft: bool,
     has_audit: bool,
-    has_ai_check: bool,
     has_reader_mirror: bool,
-    has_deep_check: bool,
     has_quality_diag: bool,
+    has_drama_diag: bool,
+    has_literary: bool,
+    has_style_court: bool,
+    has_voice_diag: bool,
+    has_editor_memo: bool,
     has_revised: bool,
     has_final: bool,
     memory_updated: bool,
 ) -> list[dict]:
+    # 与 recommend_action 保持一致：interior / atmosphere / bridge 模式跳过 drama_diag
+    chapter_mode = str(task_card.get("chapter_mode", "") or "").lower()
+    drama_required = chapter_mode not in {"interior", "atmosphere", "bridge"}
     return [
         {"name": "卷纲", "done": (not volume_state.get("required", False)) or bool(volume_state.get("ready"))},
         {
@@ -375,9 +450,14 @@ def _steps(
         {"name": "场景", "done": scene_summary["total"] > 0 and scene_summary["drafted"] == scene_summary["total"]},
         {"name": "草稿", "done": has_draft},
         {"name": "审计", "done": has_audit},
-        {"name": "AI味", "done": has_ai_check},
-        {"name": "深审", "done": has_reader_mirror and has_deep_check},
+        {"name": "读者镜像", "done": has_reader_mirror},
         {"name": "诊断", "done": has_quality_diag},
+        # interior / atmosphere / bridge 模式保护留白不量化戏剧；其他模式须跑
+        {"name": "戏剧", "done": (not drama_required) or has_drama_diag},
+        {"name": "文学批评", "done": has_literary},
+        {"name": "风格法庭", "done": has_style_court},
+        {"name": "声音", "done": has_voice_diag},
+        {"name": "编辑备忘录", "done": has_editor_memo},
         {"name": "修订", "done": has_revised or has_final},
         {"name": "定稿", "done": has_final},
         {"name": "记忆", "done": memory_updated},
@@ -392,7 +472,12 @@ def _task_card(project_dir: Path, chapter_num: int) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {"exists": True, "status": "invalid"}
-    return {"exists": True, "status": data.get("status", "draft"), "title": data.get("title", "")}
+    return {
+        "exists": True,
+        "status": data.get("status", "draft"),
+        "title": data.get("title", ""),
+        "chapter_mode": data.get("chapter_mode", ""),
+    }
 
 
 def _outline_review_state(project_dir: Path, chapter_num: int, outline: str) -> dict:
@@ -481,7 +566,7 @@ def _active_volume_plan(project_dir: Path, chapter_num: int) -> dict | None:
 
 
 def _extract_volume_chapter_range(text: str) -> tuple[int | None, int | None]:
-    match = re.search(r"(?:章节范围|覆盖章节|章节)\s*[：:]\s*(?:第)?(\d{1,4})\s*(?:章)?\s*[-~—至到]\s*(?:第)?(\d{1,4})", text)
+    match = re.search(r"(?:章节范围|覆盖章节|章节)[*]*\s*[：:][*]*\s*(?:第)?(\d{1,4})\s*(?:章)?\s*[-~—至到]\s*(?:第)?(\d{1,4})", text)
     if not match:
         return None, None
     start, end = int(match.group(1)), int(match.group(2))

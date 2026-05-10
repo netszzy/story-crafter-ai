@@ -69,4 +69,4 @@ python novel_pipeline.py --chapter 1 --mock  # Mock 跑第 1 章完整流水线
 
 ## 当前版本
 
-V5.0-UX 收口（2026-05-07）。版本演进见 `docs/HANDOFF.md`。旧测试第 001 章已移入回收站；后续合法第 001 章可以存在，不要仅按章号判断为测试残留。
+V5.0 流水线清收（2026-05-10）：移除 ai_check/deep_check；改稿门控收紧为仅硬伤触发；drama_diag 保护 interior/atmosphere/bridge；reader_mirror 降为参考层；前后台16处 bug 修复。版本演进见 `docs/HANDOFF.md`。旧测试第 001 章已移入回收站；后续合法第 001 章可以存在，不要仅按章号判断为测试残留。

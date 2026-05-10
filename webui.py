@@ -12,7 +12,6 @@ import json
 import html
 import difflib
 import subprocess
-import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -356,6 +355,34 @@ def write_env(data: dict):
         "NOVEL_CUSTOM_ASSIST_MODEL",
         "NOVEL_CUSTOM_REVISE_MODEL",
         "NOVEL_CUSTOM_CRITIC_MODEL",
+        "NOVEL_STAGE_OUTLINE_PROVIDER",
+        "NOVEL_STAGE_OUTLINE_MODEL",
+        "NOVEL_STAGE_TASK_PROVIDER",
+        "NOVEL_STAGE_TASK_MODEL",
+        "NOVEL_STAGE_SCENE_PROVIDER",
+        "NOVEL_STAGE_SCENE_MODEL",
+        "NOVEL_STAGE_DRAFT_PROVIDER",
+        "NOVEL_STAGE_DRAFT_MODEL",
+        "NOVEL_STAGE_AUDIT_PROVIDER",
+        "NOVEL_STAGE_AUDIT_MODEL",
+        "NOVEL_STAGE_FLAVOR_PROVIDER",
+        "NOVEL_STAGE_FLAVOR_MODEL",
+        "NOVEL_STAGE_MIRROR_PROVIDER",
+        "NOVEL_STAGE_MIRROR_MODEL",
+        "NOVEL_STAGE_DEEP_PROVIDER",
+        "NOVEL_STAGE_DEEP_MODEL",
+        "NOVEL_STAGE_QUALITY_PROVIDER",
+        "NOVEL_STAGE_QUALITY_MODEL",
+        "NOVEL_STAGE_DRAMA_PROVIDER",
+        "NOVEL_STAGE_DRAMA_MODEL",
+        "NOVEL_STAGE_REVISE_PROVIDER",
+        "NOVEL_STAGE_REVISE_MODEL",
+        "NOVEL_STAGE_LITERARY_PROVIDER",
+        "NOVEL_STAGE_LITERARY_MODEL",
+        "NOVEL_STAGE_STYLE_COURT_PROVIDER",
+        "NOVEL_STAGE_STYLE_COURT_MODEL",
+        "NOVEL_STAGE_FINALIZE_PROVIDER",
+        "NOVEL_STAGE_FINALIZE_MODEL",
         "NOVEL_OLLAMA_MODEL",
         "NOVEL_OLLAMA_URL",
         "NOVEL_OLLAMA_TIMEOUT",
@@ -933,9 +960,11 @@ _ACTION_PROVIDER: dict[str, str] = {
     "assemble_scenes":         "prose",
     "full_pipeline":           "prose",
     "audit":                   "critic",
-    "ai_check":                "local",
     "reader_mirror":           "critic",
-    "deep_check":              "critic",
+    "drama_diag":              "critic",
+    "literary_critic":         "critic",
+    "voice_diag":              "local",
+    "editor_memo":             "critic",
     "feedback_revise":         "revise",
     "finalize_memory":         "assist",
 }
@@ -1109,10 +1138,13 @@ def chapter_state(chapter_num: int) -> dict:
         "task_card_confirmed": task_card["status"] == "confirmed",
         "draft": artifacts["draft"],
         "audit": artifacts["audit"],
-        "ai_check": artifacts["ai_check"],
         "reader_mirror": artifacts.get("reader_mirror", False),
-        "deep_check": artifacts.get("deep_check", False),
         "quality_diag": artifacts["quality_diag"],
+        "drama_diag": artifacts.get("drama_diag", False),
+        "literary": artifacts.get("literary", False),
+        "style_court": artifacts.get("style_court", False),
+        "voice_diag": artifacts.get("voice_diag", False),
+        "editor_memo": artifacts.get("editor_memo", False),
         "revised": artifacts["revised"],
         "final": artifacts["final"],
         "memory_recent": f"## 第{chapter_num}章" in read_file("03_滚动记忆/最近摘要.md"),
@@ -1139,14 +1171,18 @@ def next_action_for_state(state: dict) -> str:
         return "运行完整流水线生成草稿。"
     if not state["audit"]:
         return "运行逻辑审计。"
-    if not state["ai_check"]:
-        return "运行 AI 味检查。"
     if not state.get("reader_mirror"):
-        return "运行读者镜像，检查追看欲、情感共振和类型卖点。"
-    if not state.get("deep_check"):
-        return "运行深度检查，评估情感冲击、主题推进和人物弧光。"
+        return "运行读者镜像（参考层），检查追看欲、情感共振和类型卖点。"
     if not state["quality_diag"]:
         return "运行章节质量诊断，检查节奏、对白、套话和任务卡对齐。"
+    if not state.get("literary"):
+        return "运行文学批评，保护克制、留白和未说之语。"
+    if not state.get("style_court"):
+        return "运行风格法庭裁决，把工程指标和文学批评的冲突分流为必改与可争议。"
+    if not state.get("voice_diag"):
+        return "运行角色声音诊断，检查角色对白指纹是否区分得开。"
+    if not state.get("editor_memo"):
+        return "生成编辑备忘录（综合所有诊断给出 P0/P1/P2 必改项）。"
     if not state["revised"]:
         return "根据审计结果决定是否生成或人工整理修订稿。"
     if not state["final"]:
@@ -2414,13 +2450,16 @@ def _smart_action_hint(action: str) -> str:
         "plan_scenes": "会优先用 LLM 把任务卡拆成 2-6 个场景，异常时降级为保守模板。",
         "draft_scene": "会为第一个缺失场景生成一个新候选稿版本。",
         "assemble_scenes": "会把各场景已选或最新候选稿合并成章节草稿。",
-        "full_pipeline": "会生成草稿、审计、AI味检查、读者镜像、草稿摘要；定稿后才写长期记忆和 RAG。",
+        "full_pipeline": "会生成草稿，依次运行审计、读者镜像、质量诊断、文学批评、风格法庭、声音诊断、编辑备忘录；氛围/留白章节自动跳过戏剧诊断。",
         "audit": "只对当前稿运行逻辑审计。",
-        "ai_check": "只对当前稿运行 AI 味检查。",
-        "reader_mirror": "从目标读者视角审视本章，不纠语言细节。",
-        "deep_check": "LLM 评估情感冲击、主题推进和人物弧光（DeepSeek CRITIC）。",
-        "quality_diag": "本地生成章节质量诊断，不额外消耗模型 token。",
-        "feedback_revise": "综合审计、AI味、读者镜像和质量诊断，调用改稿模型生成修订稿并复查。",
+        "reader_mirror": "从目标读者视角审视本章，不纠语言细节（参考层，不进 P0 必改）。",
+        "quality_diag": "本地生成章节质量诊断（节奏/对白/套话/任务卡对齐），不额外消耗模型 token。",
+        "drama_diag": "戏剧结构诊断（压力曲线/弧光/画面）；interior / atmosphere / bridge 模式章节自动跳过。",
+        "literary_critic": "文学批评：观察可被记住的瞬间、未说之语、自我欺骗——人味的核心保护层。",
+        "style_court": "风格法庭：把工程诊断和文学批评的冲突分流为必改 vs 可争议。",
+        "voice_diag": "角色声音诊断：本地分析对白指纹是否区分得开。",
+        "editor_memo": "综合所有诊断生成编辑备忘录（P0/P1/P2 必改项 + 改稿约束）。",
+        "feedback_revise": "按编辑备忘录调用改稿模型生成修订稿并复查（仅在硬伤触发）。",
         "save_final": "会把修订稿或草稿复制成定稿草案，仍需人工精修。",
         "finalize_memory": "会更新长期记忆和 RAG，建议确认定稿文本后执行。",
         "complete": "本章已闭环。",
@@ -2478,14 +2517,6 @@ def _run_smart_action(chapter_num: int, recommendation: dict, mock: bool):
             from novel_pipeline import run_audit_only
             run_audit_only(chapter_num, mock=mock)
             messages.append("审计已完成")
-        elif action == "ai_check":
-            source, text = latest_chapter_text(ch)
-            if not text:
-                raise RuntimeError("找不到可检查稿件")
-            from llm_router import LLMRouter
-            result = LLMRouter(project_dir=PROJECT_DIR).check_ai_flavor_local(text)
-            write_file(f"04_审核日志/第{ch}章_AI味检查.md", result)
-            messages.append(f"AI味检查已保存，来源：{source}")
         elif action == "reader_mirror":
             source, text = latest_chapter_text(ch)
             if not text:
@@ -2495,15 +2526,6 @@ def _run_smart_action(chapter_num: int, recommendation: dict, mock: bool):
             result = LLMRouter(project_dir=PROJECT_DIR).reader_mirror(text, recent or "")
             write_file(f"04_审核日志/第{ch}章_读者镜像.md", result)
             messages.append(f"读者镜像已保存，来源：{source}")
-        elif action == "deep_check":
-            source, text = latest_chapter_text(ch)
-            if not text:
-                raise RuntimeError("找不到可检查稿件")
-            from llm_router import LLMRouter
-            recent = read_file("03_滚动记忆/最近摘要.md")
-            result = LLMRouter(project_dir=PROJECT_DIR).deep_check(text, recent or "")
-            write_file(f"04_审核日志/第{ch}章_深度检查.md", result)
-            messages.append(f"深度检查已保存，来源：{source}")
         elif action == "quality_diag":
             source, text = latest_chapter_text(ch)
             if not text:
@@ -2511,6 +2533,98 @@ def _run_smart_action(chapter_num: int, recommendation: dict, mock: bool):
             from quality_diagnostics import write_quality_diagnostics
             _, _, report = write_quality_diagnostics(PROJECT_DIR, chapter_num, text, source)
             messages.append(f"质量诊断已保存：{report['score']}分，{report['grade']}")
+        elif action == "drama_diag":
+            source, text = latest_chapter_text(ch)
+            if not text:
+                raise RuntimeError("找不到可诊断稿件")
+            from dramatic_arc_diagnostics import (
+                build_character_briefs,
+                diagnose_chapter_drama,
+                write_diagnostics,
+            )
+            from llm_router import LLMRouter
+            from structured_store import read_task_card
+            card = read_task_card(PROJECT_DIR, chapter_num)
+            diag = diagnose_chapter_drama(
+                PROJECT_DIR,
+                chapter_num,
+                text,
+                task_card_json=card.model_dump_json(indent=2) if card else "",
+                character_briefs=build_character_briefs(PROJECT_DIR, text),
+                llm=LLMRouter(project_dir=PROJECT_DIR),
+            )
+            write_diagnostics(PROJECT_DIR, diag)
+            messages.append(f"戏剧诊断已保存（总分 {diag.overall_drama_score}）")
+        elif action == "literary_critic":
+            source, text = latest_chapter_text(ch)
+            if not text:
+                raise RuntimeError("找不到可批评稿件")
+            from literary_critic import analyze_literary_view, write_literary_view
+            from llm_router import LLMRouter
+            from structured_store import read_task_card
+            card = read_task_card(PROJECT_DIR, chapter_num)
+            view = analyze_literary_view(
+                PROJECT_DIR,
+                chapter_num,
+                text,
+                task_card_json=card.model_dump_json(indent=2) if card else "",
+                llm=LLMRouter(project_dir=PROJECT_DIR),
+            )
+            write_literary_view(PROJECT_DIR, view)
+            messages.append("文学批评已保存（不打分，不制造必改项）")
+        elif action == "style_court":
+            from style_court import adjudicate, write_style_court
+            from literary_critic import read_literary_view
+            from structured_store import read_task_card
+            quality_report = json.loads(
+                read_file(f"04_审核日志/第{ch}章_质量诊断.json") or "{}"
+            )
+            literary = read_literary_view(PROJECT_DIR, chapter_num)
+            if literary is None:
+                raise RuntimeError("先生成文学批评再运行风格法庭。")
+            decision = adjudicate(
+                PROJECT_DIR,
+                chapter_num,
+                quality_report=quality_report,
+                literary_view=literary,
+                task_card=read_task_card(PROJECT_DIR, chapter_num),
+            )
+            write_style_court(PROJECT_DIR, decision)
+            messages.append(
+                f"风格法庭已裁决：confirmed={len(decision.confirmed_issues)} / contested={len(decision.contested_issues)}"
+            )
+        elif action == "voice_diag":
+            from voice_diagnostics import (
+                analyze_character_voices,
+                write_voice_diagnostics,
+            )
+            fp = analyze_character_voices(PROJECT_DIR, chapter_num)
+            write_voice_diagnostics(PROJECT_DIR, fp)
+            messages.append("角色声音诊断已保存")
+        elif action == "editor_memo":
+            source, text = latest_chapter_text(ch)
+            if not text:
+                raise RuntimeError("找不到可备忘的稿件")
+            from editor_memo import synthesize_memo, write_memo
+            from literary_critic import read_literary_view
+            from style_court import read_style_court
+            from dramatic_arc_diagnostics import read_diagnostics as _read_drama
+            quality_report = json.loads(
+                read_file(f"04_审核日志/第{ch}章_质量诊断.json") or "{}"
+            )
+            memo = synthesize_memo(
+                PROJECT_DIR,
+                chapter_num,
+                text,
+                audit_text=read_file(f"04_审核日志/第{ch}章_审计.md"),
+                reader_mirror_text=read_file(f"04_审核日志/第{ch}章_读者镜像.md"),
+                quality_report=quality_report or None,
+                drama_diag=_read_drama(PROJECT_DIR, chapter_num),
+                literary_view=read_literary_view(PROJECT_DIR, chapter_num),
+                style_court_decision=read_style_court(PROJECT_DIR, chapter_num),
+            )
+            write_memo(PROJECT_DIR, memo)
+            messages.append(f"编辑备忘录已保存（必改项 {len(memo.top_3_must_fix)} 条）")
         elif action == "feedback_revise":
             from novel_pipeline import run_revise_from_feedback
             run_revise_from_feedback(chapter_num, mock=mock)
@@ -2807,103 +2921,6 @@ def page_worldbuilding():
 
 # ─── 页面：大纲 ─────────────────────────────────────────────────────────────
 
-def _render_volume_outline_ai_panel(selected_volume: str, mock: bool, key_prefix: str = "volume_ai") -> None:
-    st.subheader("卷纲 AI 辅助")
-    volume_brief = st.text_area(
-        "卷纲补充要求",
-        height=100,
-        key=f"{key_prefix}_brief_{selected_volume}",
-        placeholder="例如：本卷负责立局，前三分之一制造技术礼物的诱惑，中段引出代价，卷末让主角第一次主动越界。",
-    )
-    col_gen, col_review, col_improve = st.columns(3)
-    if col_gen.button(
-        "生成卷纲草案",
-        type="primary",
-        use_container_width=True,
-        disabled=_is_llm_running(),
-        key=f"{key_prefix}_generate_{selected_volume}",
-    ):
-        def work(cancel_event):
-            from planning_assist import generate_volume_outline_draft
-            apply_runtime_mode(mock)
-            path = generate_volume_outline_draft(PROJECT_DIR, selected_volume, volume_brief, mock=mock)
-            return str(path.relative_to(PROJECT_DIR))
-
-        _start_llm_background_job(
-            f"{Path(selected_volume).stem} AI 卷纲生成",
-            work,
-            eta_seconds=90,
-            on_success=lambda rel: st.success(f"已生成：{rel}"),
-        )
-
-    review_cache_key = f"outline_卷纲_{selected_volume}"
-    review_key = f"review_result_outline_卷纲_{selected_volume}_{key_prefix}"
-    review_result = st.session_state.get(review_key, "") or _load_review("outline", review_cache_key)
-    if review_result and not st.session_state.get(review_key):
-        st.session_state[review_key] = review_result
-    cached_review = _render_review_reload_controls(
-        "outline",
-        review_cache_key,
-        review_key,
-        f"{Path(selected_volume).stem}卷纲审查",
-        key_prefix=key_prefix,
-    )
-    if not review_result and cached_review:
-        review_result = cached_review
-
-    if col_review.button(
-        "AI 审查卷纲",
-        use_container_width=True,
-        disabled=_is_llm_running(),
-        key=f"{key_prefix}_review_{selected_volume}",
-    ):
-        def work(cancel_event):
-            from planning_assist import review_volume_outline
-            apply_runtime_mode(mock)
-            result = review_volume_outline(PROJECT_DIR, selected_volume, mock=mock)
-            _save_review("outline", review_cache_key, result)
-            return result
-
-        def done(result):
-            st.session_state[review_key] = result
-            st.success(f"{Path(selected_volume).stem}卷纲审查完成")
-
-        _start_llm_background_job(f"{Path(selected_volume).stem} AI 卷纲审查", work, eta_seconds=90, on_success=done)
-
-    edited_review = _render_editable_review_text(
-        "outline",
-        review_cache_key,
-        review_key,
-        review_result,
-        "卷纲审查报告",
-        key_prefix=key_prefix,
-    )
-
-    if col_improve.button(
-        "根据审查改卷纲",
-        use_container_width=True,
-        disabled=_is_llm_running(),
-        key=f"{key_prefix}_improve_{selected_volume}",
-    ):
-        review_for_improve = (edited_review or review_result or _load_review("outline", review_cache_key) or "").strip()
-        if not review_for_improve:
-            st.warning("还没有可用的卷纲审查报告。请先运行 AI 审查。")
-            st.stop()
-
-        def work(cancel_event):
-            from planning_assist import improve_volume_outline
-            apply_runtime_mode(mock)
-            path = improve_volume_outline(PROJECT_DIR, selected_volume, review_for_improve, mock=mock)
-            return str(path.relative_to(PROJECT_DIR))
-
-        _start_llm_background_job(
-            f"{Path(selected_volume).stem} AI 卷纲改稿",
-            work,
-            eta_seconds=90,
-            on_success=lambda rel: st.success(f"改稿已保存到 AI 草案：{rel}"),
-        )
-
-
 def page_outline():
     st.title("大纲")
     tab_total, tab_volumes, tab_chapters, tab_task_cards, tab_assist = st.tabs(["总纲", "卷/幕", "章纲", "任务卡", "AI辅助"])
@@ -2936,9 +2953,6 @@ def page_outline():
             if plans:
                 selected_volume = st.selectbox("编辑卷纲", [p.path.name for p in plans], key="volume_plan_select")
                 _md_editor(f"01_大纲/卷纲/{selected_volume}", key=f"volume_{selected_volume}", height=620)
-                st.divider()
-                mock = st.session_state.get("_global_mock", False)
-                _render_volume_outline_ai_panel(selected_volume, mock, key_prefix="volume_tab_ai")
             else:
                 st.info("卷纲会作为长篇结构层进入项目轴、正文上下文和 RAG。")
 
@@ -2994,20 +3008,6 @@ def page_outline():
                 if info["exists"]:
                     _render_task_card_v5_controls(task_path, ch)
 
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    if st.button("从章纲生成/刷新任务卡", type="primary", use_container_width=True):
-                        from structured_store import sync_task_card_from_outline
-                        card = sync_task_card_from_outline(PROJECT_DIR, task_num, outline_text, preserve_confirmation=False)
-                        st.success(f"已生成任务卡草稿：{card.title}")
-                        st.rerun()
-                with col_b:
-                    if st.button("确认任务卡", use_container_width=True, disabled=not info["exists"]):
-                        from structured_store import confirm_task_card
-                        card = confirm_task_card(PROJECT_DIR, task_num)
-                        st.success(f"已确认任务卡：{card.title}")
-                        st.rerun()
-
                 st.divider()
                 if (PROJECT_DIR / task_path).exists():
                     _json_file_editor(task_path, key=f"task_card_json_{ch}", height=460)
@@ -3032,31 +3032,7 @@ def page_outline():
                 on_success=lambda rel: st.success(f"已生成：{rel}"),
             )
 
-        st.divider()
-        st.subheader("卷纲辅助生成")
-        volume_files = list_md("01_大纲/卷纲")
-        if volume_files:
-            assist_volume_name = st.selectbox("选择卷纲", volume_files, key="assist_volume_name")
-            _render_volume_outline_ai_panel(assist_volume_name, mock, key_prefix="assist_tab_volume_ai")
-        else:
-            st.info("暂无卷纲。请先在「卷/幕」页初始化卷纲模板。")
-
-        st.divider()
-        st.subheader("章纲辅助生成")
-        chapter_num = st.number_input("章节号", min_value=1, value=1, step=1, key="assist_chapter_num")
-        chapter_brief = st.text_area("章纲灵感", height=120, key="assist_chapter_brief")
-        if st.button("生成章纲草案", use_container_width=True, disabled=_is_llm_running()):
-            def work(cancel_event):
-                from planning_assist import generate_chapter_outline_draft
-                apply_runtime_mode(mock)
-                return str(generate_chapter_outline_draft(PROJECT_DIR, int(chapter_num), chapter_brief, mock=mock).relative_to(PROJECT_DIR))
-
-            _start_llm_background_job(
-                "生成章纲草案",
-                work,
-                eta_seconds=90,
-                on_success=lambda rel: st.success(f"已生成：{rel}"),
-            )
+        # "卷纲辅助生成" and "章纲辅助生成" removed to simplify the UI and fix the NameError.
 
         st.divider()
         st.subheader("AI 审查 / 改稿")
@@ -3114,14 +3090,9 @@ def page_outline():
             key=_widget_key(outline_review_widget_prefix, "run_review"),
         ):
             def work(cancel_event):
-                from planning_assist import review_global_outline, review_volume_outline, review_chapter_outline
+                from planning_assist import review_global_outline
                 apply_runtime_mode(mock)
-                if outline_review_target == "卷纲" and review_volume_name:
-                    result = review_volume_outline(PROJECT_DIR, review_volume_name, mock=mock)
-                elif outline_review_target == "章纲" and review_ch_num:
-                    result = review_chapter_outline(PROJECT_DIR, review_ch_num, mock=mock)
-                else:
-                    result = review_global_outline(PROJECT_DIR, mock=mock)
+                result = review_global_outline(PROJECT_DIR, mock=mock)
                 _save_review("outline", _outline_cache_key, result)
                 return result
 
@@ -3162,14 +3133,9 @@ def page_outline():
                 st.stop()
 
             def work(cancel_event):
-                from planning_assist import improve_global_outline, improve_volume_outline, improve_chapter_outline
+                from planning_assist import improve_global_outline
                 apply_runtime_mode(mock)
-                if outline_review_target == "卷纲" and review_volume_name:
-                    path = improve_volume_outline(PROJECT_DIR, review_volume_name, outline_review_for_improve, mock=mock)
-                elif outline_review_target == "章纲" and review_ch_num:
-                    path = improve_chapter_outline(PROJECT_DIR, review_ch_num, outline_review_for_improve, mock=mock)
-                else:
-                    path = improve_global_outline(PROJECT_DIR, outline_review_for_improve, mock=mock)
+                path = improve_global_outline(PROJECT_DIR, outline_review_for_improve, mock=mock)
                 return str(path.relative_to(PROJECT_DIR))
 
             _start_llm_background_job(
@@ -3415,7 +3381,7 @@ def _render_quality_radar(report: dict):
 
 # ─── 流水线执行 ──────────────────────────────────────────────────────────────
 
-def _run_pipeline(chapter_num: int, generate: bool, audit: bool, ai_check: bool, reader_mirror: bool, deep_check: bool, quality: bool, mock: bool):
+def _run_pipeline(chapter_num: int, generate: bool, audit: bool, reader_mirror: bool, quality: bool, mock: bool):
     def work(cancel_event):
         apply_runtime_mode(mock)
         ch = ch_str(chapter_num)
@@ -3433,25 +3399,13 @@ def _run_pipeline(chapter_num: int, generate: bool, audit: bool, ai_check: bool,
             from novel_pipeline import run_audit_only
             run_audit_only(chapter_num, mock=mock)
             messages.append("逻辑审计已完成")
-        if ai_check:
-            from llm_router import LLMRouter
-            result = LLMRouter(project_dir=PROJECT_DIR).check_ai_flavor_local(text)
-            write_file(f"04_审核日志/第{ch}章_AI味检查.md", result)
-            messages.append(f"AI 味检查已保存，来源：{source}")
         if reader_mirror:
             from llm_router import LLMRouter
             result = LLMRouter(project_dir=PROJECT_DIR).reader_mirror(
                 text, read_file("03_滚动记忆/最近摘要.md") or ""
             )
             write_file(f"04_审核日志/第{ch}章_读者镜像.md", result)
-            messages.append(f"读者镜像已保存，来源：{source}")
-        if deep_check:
-            from llm_router import LLMRouter
-            result = LLMRouter(project_dir=PROJECT_DIR).deep_check(
-                text, read_file("03_滚动记忆/最近摘要.md") or ""
-            )
-            write_file(f"04_审核日志/第{ch}章_深度检查.md", result)
-            messages.append(f"深度检查已保存，来源：{source}")
+            messages.append(f"读者镜像已保存（参考层），来源：{source}")
         if quality:
             from quality_diagnostics import write_quality_diagnostics
             _, _, report = write_quality_diagnostics(PROJECT_DIR, chapter_num, text, source)
@@ -3468,248 +3422,7 @@ def _run_pipeline(chapter_num: int, generate: bool, audit: bool, ai_check: bool,
         eta_seconds=180 if generate else 75,
         on_success=done,
     )
-    return
 
-    ch = ch_str(chapter_num)
-    if _is_llm_running():
-        st.warning("有正在执行的 LLM 操作，请稍后再试。")
-        return
-    _set_llm_running(True)
-    with st.status(f"第{chapter_num}章流水线执行中...", expanded=True) as status:
-        try:
-            apply_runtime_mode(mock)
-            from rag_engine import NovelRAG
-            from llm_router import LLMRouter
-            from novel_pipeline import has_actionable_audit_issue, write_draft_summary
-            from structured_store import sync_task_card_from_outline, write_review_json
-
-            st.write("初始化 RAG 和 LLM...")
-            rag = NovelRAG(str(PROJECT_DIR))
-            llm = LLMRouter(project_dir=PROJECT_DIR)
-
-            if generate:
-                st.write("读取上下文文件...")
-                from prompt_assembly import (
-                    build_axis_context,
-                    build_chapter_context,
-                    render_prose_system_prompt,
-                    render_task_card_block,
-                )
-
-                chapter_outline = read_file(f"01_大纲/章纲/第{ch}章.md")
-                if not chapter_outline.strip():
-                    st.error("章纲为空，请先填写章纲内容")
-                    status.update(label="失败：章纲为空", state="error")
-                    return
-                card = sync_task_card_from_outline(
-                    PROJECT_DIR,
-                    chapter_num,
-                    chapter_outline,
-                    llm=llm,
-                    context=build_axis_context(PROJECT_DIR),
-                )
-                st.write(f"章节任务卡已同步（状态：{card.status}）")
-
-                system_prompt = render_prose_system_prompt(PROJECT_DIR, chapter_num)
-                ctx = build_chapter_context(PROJECT_DIR, rag, chapter_outline)
-                task_card_block = render_task_card_block(PROJECT_DIR, chapter_num)
-
-                st.write("生成正文草稿...")
-                draft = llm.generate_chapter(
-                    system_prompt, ctx, chapter_outline, task_card_text=task_card_block
-                )
-                write_file(f"02_正文/第{ch}章_草稿.md", draft)
-                source = f"02_正文/第{ch}章_草稿.md"
-                st.write(f"草稿已保存（{word_count(draft)} 字）")
-            else:
-                source, draft = latest_chapter_text(ch)
-                if not draft:
-                    st.error("找不到可处理稿件，请先运行完整流水线生成正文")
-                    status.update(label="失败：稿件不存在", state="error")
-                    return
-                st.write(f"读取当前稿件：{source}")
-            current_text = draft
-            current_source = source
-
-            if audit:
-                st.write("逻辑审计...")
-                settings_doc = read_file("00_世界观/世界观.md")
-                audit_result = llm.audit_logic(
-                    draft,
-                    settings_doc,
-                    read_file("03_滚动记忆/最近摘要.md"),
-                )
-                write_file(f"04_审核日志/第{ch}章_审计.md", audit_result)
-                write_review_json(PROJECT_DIR, chapter_num, audit_result, getattr(llm, "DEEPSEEK_MODEL", ""))
-                st.write("审计报告已保存")
-
-            if ai_check:
-                st.write("AI 味检查...")
-                ai_result = llm.check_ai_flavor_local(draft)
-                write_file(f"04_审核日志/第{ch}章_AI味检查.md", ai_result)
-                st.write("AI 味检查已保存")
-            else:
-                ai_result = read_file(f"04_审核日志/第{ch}章_AI味检查.md")
-
-            if reader_mirror:
-                st.write("读者镜像检查...")
-                mirror_result = llm.reader_mirror(draft, read_file("03_滚动记忆/最近摘要.md") or "")
-                write_file(f"04_审核日志/第{ch}章_读者镜像.md", mirror_result)
-                st.write("读者镜像已保存")
-            else:
-                mirror_result = read_file(f"04_审核日志/第{ch}章_读者镜像.md")
-
-            if deep_check:
-                st.write("深度检查（情感冲击/主题/弧光）...")
-                deep_result = llm.deep_check(draft, read_file("03_滚动记忆/最近摘要.md") or "")
-                write_file(f"04_审核日志/第{ch}章_深度检查.md", deep_result)
-                st.write("深度检查已保存")
-            else:
-                deep_result = read_file(f"04_审核日志/第{ch}章_深度检查.md")
-
-            draft_quality_report = None
-            draft_quality_brief = ""
-            if quality:
-                from quality_diagnostics import analyze_chapter_quality, render_revision_brief
-
-                draft_quality_report = analyze_chapter_quality(PROJECT_DIR, chapter_num, draft, source)
-                draft_quality_brief = render_revision_brief(draft_quality_report)
-
-            if audit:
-                audit_result = read_file(f"04_审核日志/第{ch}章_审计.md")
-                from quality_diagnostics import quality_needs_revision
-                needs_audit_revision = has_actionable_audit_issue(audit_result)
-                needs_quality_revision = bool(draft_quality_report) and quality_needs_revision(draft_quality_report)
-                if needs_audit_revision or needs_quality_revision:
-                    st.write("发现问题，生成修订稿...")
-                    from prompt_assembly import (
-                        build_chapter_context,
-                        render_prose_system_prompt,
-                        render_task_card_block,
-                    )
-
-                    revision_outline = read_file(f"01_大纲/章纲/第{ch}章.md")
-                    system_prompt = render_prose_system_prompt(PROJECT_DIR, chapter_num)
-                    ctx_reload = build_chapter_context(PROJECT_DIR, rag, revision_outline)
-                    task_card_block = render_task_card_block(PROJECT_DIR, chapter_num)
-                    revision_user_prompt = (
-                        f"审计报告如下，请修订章节，修正所有问题，保持文风：\n\n{audit_result}\n\n"
-                        f"AI味检查如下：\n\n{ai_result}\n\n"
-                        f"读者视角反馈：\n\n{mirror_result}\n\n"
-                        f"深度检查（情感/主题/弧光）：\n\n{deep_result}\n\n"
-                        f"章节质量诊断改稿指令如下：\n\n{draft_quality_brief}\n\n"
-                        f"原文：\n\n{draft}"
-                    )
-                    revised = llm.revise_chapter(
-                        system_prompt,
-                        ctx_reload,
-                        revision_user_prompt,
-                        task_card_text=task_card_block,
-                    )
-                    write_file(f"02_正文/第{ch}章_修订稿.md", revised)
-                    current_text = revised
-                    current_source = f"02_正文/第{ch}章_修订稿.md"
-                    st.write(f"修订稿已保存（{word_count(revised)} 字）")
-                    st.write("修订稿复审...")
-                    settings_doc = read_file("00_世界观/世界观.md")
-                    reaudit_result = llm.audit_logic(
-                        revised,
-                        settings_doc,
-                        read_file("03_滚动记忆/最近摘要.md"),
-                    )
-                    reaudit_rel = f"04_审核日志/第{ch}章_复审.md"
-                    write_file(reaudit_rel, reaudit_result)
-                    from structured_store import write_review_json_for_source
-
-                    write_review_json_for_source(
-                        PROJECT_DIR,
-                        chapter_num,
-                        reaudit_result,
-                        getattr(llm, "DEEPSEEK_MODEL", ""),
-                        reaudit_rel,
-                        target_id=f"ch{ch}_reaudit",
-                    )
-                    st.write("修订稿复审已保存")
-                else:
-                    st.write("审计和质量诊断未发现明显问题，跳过自动修订")
-
-            if quality:
-                st.write("章节质量诊断...")
-                from quality_diagnostics import write_quality_diagnostics
-
-                quality_md, quality_json, quality_report = write_quality_diagnostics(
-                    PROJECT_DIR,
-                    chapter_num,
-                    current_text,
-                    current_source,
-                )
-                st.write(
-                    f"质量诊断已保存（{quality_report['score']}分，{quality_report['grade']}）："
-                    f"{quality_md.relative_to(PROJECT_DIR)} / {quality_json.relative_to(PROJECT_DIR)}"
-                )
-                st.write("文学批评层与风格法庭...")
-                from dramatic_arc_diagnostics import read_diagnostics
-                from editor_memo import synthesize_memo, write_memo
-                from literary_critic import analyze_literary_view, write_literary_view
-                from structured_store import read_task_card
-                from style_court import adjudicate, write_style_court
-
-                card = read_task_card(PROJECT_DIR, chapter_num)
-                literary_view = analyze_literary_view(
-                    PROJECT_DIR,
-                    chapter_num,
-                    current_text,
-                    task_card_json=card.model_dump_json(indent=2) if card else "",
-                    llm=llm,
-                )
-                literary_md, literary_json = write_literary_view(PROJECT_DIR, literary_view)
-                court_decision = adjudicate(PROJECT_DIR, chapter_num, quality_report, literary_view, task_card=card)
-                court_md, court_json = write_style_court(PROJECT_DIR, court_decision)
-                drama_diag = read_diagnostics(PROJECT_DIR, chapter_num)
-                memo = synthesize_memo(
-                    PROJECT_DIR,
-                    chapter_num,
-                    current_text,
-                    audit_text=read_file(f"04_审核日志/第{ch}章_审计.md"),
-                    ai_flavor_text=ai_result,
-                    reader_mirror_text=mirror_result,
-                    deep_check_text=deep_result,
-                    quality_report=quality_report,
-                    drama_diag=drama_diag,
-                    literary_view=literary_view,
-                    style_court_decision=court_decision,
-                    llm=llm,
-                )
-                memo_md, memo_json = write_memo(PROJECT_DIR, memo)
-                st.write(
-                    "文学批评、风格法庭和编辑备忘录已保存："
-                    f"{literary_md.relative_to(PROJECT_DIR)} / {court_md.relative_to(PROJECT_DIR)} / "
-                    f"{memo_md.relative_to(PROJECT_DIR)}"
-                )
-
-            if generate:
-                st.write("生成草稿摘要（不写入滚动记忆/RAG）...")
-                final_text = current_text
-                summary = llm.summarize_local(final_text)
-                if summary:
-                    summary_md, summary_json = write_draft_summary(chapter_num, summary, current_source)
-                    st.write(
-                        "草稿摘要已保存，定稿后再更新长期记忆和 RAG："
-                        f"{summary_md.relative_to(PROJECT_DIR)} / {summary_json.relative_to(PROJECT_DIR)}"
-                    )
-                else:
-                    st.warning("Ollama 摘要未返回，跳过草稿摘要（定稿记忆仍可后续生成）")
-
-            status.update(label=f"第{chapter_num}章完成！", state="complete")
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"错误：{e}")
-            with st.expander("详细错误"):
-                st.code(traceback.format_exc())
-            status.update(label="执行失败", state="error")
-        finally:
-            _set_llm_running(False)
 
 
 def _run_feedback_revision(chapter_num: int, mock: bool):
@@ -4523,11 +4236,8 @@ def _render_style_profile_manager(compact: bool = False) -> None:
     from style_profiles import (
         STYLE_PROFILES,
         list_style_profiles,
-        get_style_profile,
-        save_user_profile,
         delete_user_profile,
     )
-    from style_profiles import StyleProfile as SP
 
     # 加载当前所有档案
     all_profiles = list_style_profiles(PROJECT_DIR)
@@ -4620,7 +4330,7 @@ def _render_style_profile_edit_form(
     close_key,          # str
 ):
     """单个 StyleProfile 的编辑/新增表单。"""
-    from style_profiles import StyleProfile, save_user_profile, STYLE_PROFILES
+    from style_profiles import StyleProfile, save_user_profile
 
     name_val = profile.name if profile else ""
     display_name_val = profile.display_name if profile else ""
@@ -4902,6 +4612,51 @@ def page_settings():
 
         active_route_providers = {prose_provider, assist_provider, revise_provider, critic_provider}
 
+
+        # ── AI 推进环节独立配置 ──
+        st.divider()
+        st.subheader("AI 推进环节细分模型配置")
+        st.caption("针对 AI 自动推进工作流的各个具体环节，覆盖上方的全局角色配置（留空则继承全局）。")
+        with st.expander("展开环节细分配置", expanded=False):
+            stages = {
+                "outline": "大纲与策划 (生成章纲/世界观/角色)",
+                "task": "任务卡 (任务与大纲核对)",
+                "scene": "场景计划 (拆解场景)",
+                "draft": "正文草稿 (正文生成)",
+                "audit": "逻辑审计 (逻辑一致性检查)",
+                "mirror": "读者镜像 (情感推演，参考层)",
+                "quality": "质量诊断 (规则级质量把控)",
+                "drama": "戏剧诊断 (压力/弧光/画面打分)",
+                "literary": "文学批评 (人味保护层)",
+                "style_court": "风格法庭 (诊断冲突裁决)",
+                "revise": "修订改稿 (综合审查意见改写)",
+                "finalize": "定稿收尾 (伏笔/状态提取)",
+            }
+            
+            stage_configs = {}
+            for stage_key, stage_label in stages.items():
+                st.markdown(f"**{stage_label}**")
+                s_col1, s_col2 = st.columns([1, 2])
+                
+                prov_val = env_data.get(f"NOVEL_STAGE_{stage_key.upper()}_PROVIDER", "")
+                mod_val = env_data.get(f"NOVEL_STAGE_{stage_key.upper()}_MODEL", "")
+                
+                sel_prov = s_col1.selectbox(
+                    f"供应商 ({stage_key})", 
+                    ["(继承全局)", "anthropic", "deepseek", "openrouter", "custom"], 
+                    index=["", "anthropic", "deepseek", "openrouter", "custom"].index(prov_val) if prov_val in ["anthropic", "deepseek", "openrouter", "custom"] else 0,
+                    key=f"stage_prov_{stage_key}"
+                )
+                sel_mod = s_col2.text_input(
+                    f"指定模型 ({stage_key})", 
+                    value=mod_val,
+                    placeholder="留空继承上方配置",
+                    key=f"stage_mod_{stage_key}"
+                )
+                stage_configs[f"NOVEL_STAGE_{stage_key.upper()}_PROVIDER"] = sel_prov if sel_prov != "(继承全局)" else ""
+                stage_configs[f"NOVEL_STAGE_{stage_key.upper()}_MODEL"] = sel_mod.strip()
+                
+    
         # ── 供应商连接参数（API 接入 + 共享模型，不含 per-role 配置）────────
         st.subheader("供应商连接参数")
         st.caption("各供应商的接入与共享模型设置，只显示上方已选用的供应商。")
@@ -5064,6 +4819,7 @@ def page_settings():
                 else openrouter_critic_model.strip()
             )
             env_data.update({
+                **stage_configs,
                 "ANTHROPIC_API_KEY": anthropic_key,
                 "DEEPSEEK_API_KEY": deepseek_key,
                 "OPENROUTER_API_KEY": openrouter_key,
@@ -5445,7 +5201,7 @@ def main():
         "中台": page_project_center,
         "世界观": page_worldbuilding,
         "大纲": page_outline,
-        "写作": page_generate,
+        "写作台": page_generate,
         "记忆": page_memory,
         "日志": page_logs,
         "设置页": page_settings,

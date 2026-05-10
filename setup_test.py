@@ -4,8 +4,6 @@ setup_test.py — 本地环境验证（不需要 API Key）
 """
 
 import os
-import sys
-import json
 import requests
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -56,7 +54,7 @@ def test_chroma():
     client.delete_collection("test")
     import shutil
     shutil.rmtree(db_path, ignore_errors=True)
-    return f"写入/读取正常"
+    return "写入/读取正常"
 
 check("ChromaDB 持久化读写", test_chroma)
 

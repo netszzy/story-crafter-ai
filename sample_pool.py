@@ -11,11 +11,9 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from novel_schemas import ProseSampleEntry, write_json_model
+from novel_schemas import ProseSampleEntry
 
 POOL_REL = "05_项目管理/prose_sample_pool.json"
 POOL_CAP = 50

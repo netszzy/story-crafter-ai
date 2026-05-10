@@ -15,7 +15,7 @@ from pathlib import Path
 
 VOLUME_DIR_REL = "01_大纲/卷纲"
 VOLUME_FILE_PATTERN = re.compile(r"第(\d+)卷\.md$")
-CHAPTER_RANGE_PATTERN = re.compile(r"(?:章节范围|覆盖章节|章节)\s*[：:]\s*(?:第)?(\d{1,4})\s*(?:章)?\s*[-~—至到]\s*(?:第)?(\d{1,4})")
+CHAPTER_RANGE_PATTERN = re.compile(r"(?:章节范围|覆盖章节|章节)[*]*\s*[：:][*]*\s*(?:第)?(\d{1,4})\s*(?:章)?\s*[-~—至到]\s*(?:第)?(\d{1,4})")
 
 
 @dataclass

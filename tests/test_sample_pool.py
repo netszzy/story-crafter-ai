@@ -1,6 +1,5 @@
 """V3.1 样本池单元测试。"""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path

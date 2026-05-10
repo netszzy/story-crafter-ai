@@ -42,6 +42,15 @@ except Exception:  # pragma: no cover - optional dependency guard
 PROJECT_DIR = Path(__file__).resolve().parent
 if load_dotenv:
     load_dotenv(PROJECT_DIR / ".env")
+    # 修复 IDE/sandbox 常注入的"空字符串"覆盖（如 ANTHROPIC_API_KEY=""）。
+    # 不用 override=True：那会把运行时设置（如 apply_mock_env 设的 NOVEL_LLM_MODE=mock）也盖掉。
+    try:
+        from dotenv import dotenv_values
+        for _k, _v in (dotenv_values(PROJECT_DIR / ".env") or {}).items():
+            if _v and not os.getenv(_k):
+                os.environ[_k] = _v
+    except Exception:
+        pass
 
 MOCK_LITERARY_WARNING = (
     "[Mock 模式：本结果仅验证管道连通，未做文学质量评估。"
@@ -71,6 +80,99 @@ def _middle_clip_text(text: str, limit: int, label: str) -> str:
     head_len = max(1, budget // 2)
     tail_len = max(1, budget - head_len)
     return f"{text[:head_len].rstrip()}{marker}{text[-tail_len:].lstrip()}"
+
+
+
+import functools
+import os
+
+def stage_route(workflow_arg_index=None, default_workflow=None):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            workflow = default_workflow
+            if workflow_arg_index is not None and len(args) > workflow_arg_index:
+                workflow = args[workflow_arg_index]
+            elif "workflow" in kwargs:
+                workflow = kwargs["workflow"]
+            
+            if not workflow:
+                workflow = default_workflow or func.__name__
+
+            mapping = {
+                'generate_chapter': 'draft',
+                'audit_logic': 'audit',
+                'check_ai_flavor_local': 'flavor',
+                'reader_mirror': 'mirror',
+                'deep_check': 'deep',
+                'revise_chapter': 'revise',
+                'revise_text': 'revise',
+                'foreshadowing_extract': 'finalize',
+                'character_state_update': 'finalize',
+                'scene_plan': 'scene',
+                'assist_chapter_outline': 'outline',
+                'review_chapter_outline': 'outline',
+                'improve_chapter_outline': 'outline',
+                'assist_global_outline': 'outline',
+                'assist_volume_outline': 'outline',
+                'assist_character': 'outline',
+                'dramatic-diagnose': 'drama',
+                'quality_diagnostics': 'quality',
+                'literary-critic': 'literary',
+                'style_court': 'style_court',
+            }
+            stage = mapping.get(workflow)
+            if not stage:
+                if workflow.startswith('assist_'): stage = 'outline'
+                elif workflow.startswith('review_'): stage = 'outline'
+                elif workflow.startswith('improve_'): stage = 'outline'
+                else: stage = workflow
+                
+            provider = os.getenv(f"NOVEL_STAGE_{stage.upper()}_PROVIDER")
+            model = os.getenv(f"NOVEL_STAGE_{stage.upper()}_MODEL")
+            
+            old_state = {}
+            if provider and model:
+                old_state = {
+                    "PROSE_PROVIDER": self.PROSE_PROVIDER,
+                    "CRITIC_PROVIDER": self.CRITIC_PROVIDER,
+                    "REVISE_PROVIDER": self.REVISE_PROVIDER,
+                    "ASSIST_PROVIDER": self.ASSIST_PROVIDER,
+                    "CLAUDE_MODEL": self.CLAUDE_MODEL,
+                    "DEEPSEEK_MODEL": self.DEEPSEEK_MODEL,
+                    "OPENROUTER_PROSE_MODEL": self.OPENROUTER_PROSE_MODEL,
+                    "OPENROUTER_CRITIC_MODEL": self.OPENROUTER_CRITIC_MODEL,
+                    "OPENROUTER_REVISE_MODEL": self.OPENROUTER_REVISE_MODEL,
+                    "OPENROUTER_ASSIST_MODEL": self.OPENROUTER_ASSIST_MODEL,
+                    "CUSTOM_PROSE_MODEL": self.CUSTOM_PROSE_MODEL,
+                    "CUSTOM_CRITIC_MODEL": self.CUSTOM_CRITIC_MODEL,
+                    "CUSTOM_REVISE_MODEL": self.CUSTOM_REVISE_MODEL,
+                    "CUSTOM_ASSIST_MODEL": self.CUSTOM_ASSIST_MODEL,
+                    "CUSTOM_MODEL": self.CUSTOM_MODEL,
+                }
+                self.PROSE_PROVIDER = provider
+                self.CRITIC_PROVIDER = provider
+                self.REVISE_PROVIDER = provider
+                self.ASSIST_PROVIDER = provider
+                self.CLAUDE_MODEL = model
+                self.DEEPSEEK_MODEL = model
+                self.OPENROUTER_PROSE_MODEL = model
+                self.OPENROUTER_CRITIC_MODEL = model
+                self.OPENROUTER_REVISE_MODEL = model
+                self.OPENROUTER_ASSIST_MODEL = model
+                self.CUSTOM_PROSE_MODEL = model
+                self.CUSTOM_CRITIC_MODEL = model
+                self.CUSTOM_REVISE_MODEL = model
+                self.CUSTOM_ASSIST_MODEL = model
+                self.CUSTOM_MODEL = model
+
+            try:
+                return func(self, *args, **kwargs)
+            finally:
+                for k, v in old_state.items():
+                    setattr(self, k, v)
+        return wrapper
+    return decorator
 
 
 class LLMRouter:
@@ -140,6 +242,7 @@ class LLMRouter:
     # Public API
     # ------------------------------------------------------------------
 
+    @stage_route(default_workflow='generate_chapter')
     def generate_chapter(
         self,
         system_prompt: str,
@@ -148,6 +251,11 @@ class LLMRouter:
         task_card_text: str = "",
         max_tokens: int | None = None,
     ) -> str:
+        if self.mode != "mock" and self.PROSE_PROVIDER not in {"anthropic", "openrouter", "custom", "deepseek"}:
+            raise RuntimeError(
+                f"NOVEL_PROSE_PROVIDER='{self.PROSE_PROVIDER}' 不支持。"
+                "正文生成支持 anthropic / openrouter / custom / deepseek，请检查 .env。"
+            )
         user_msg = self._compose_chapter_user_msg(context, chapter_outline, task_card_text)
         payload = f"{system_prompt}\n\n{user_msg}"
         if self.PROSE_PROVIDER == "openrouter":
@@ -236,6 +344,7 @@ class LLMRouter:
             )
             raise
 
+    @stage_route(default_workflow='audit_logic')
     def audit_logic(self, chapter_text: str, settings_doc: str = "", recent_summary: str = "") -> str:
         # Auto-inject project axis so auditors always see full constraints (V1.7.2)
         axis = self._axis_context()
@@ -313,6 +422,7 @@ class LLMRouter:
             )
             raise
 
+    @stage_route(workflow_arg_index=2, default_workflow='critic')
     def critic_text(
         self,
         system_prompt: str,
@@ -382,6 +492,7 @@ class LLMRouter:
             self._log_call(workflow, role, "deepseek", self.DEEPSEEK_MODEL, payload, "error", str(exc))
             raise
 
+    @stage_route(workflow_arg_index=2, default_workflow='revise')
     def revise_text(
         self,
         system_prompt: str,
@@ -468,6 +579,7 @@ class LLMRouter:
             self._log_call(workflow, role, "anthropic", self.CLAUDE_MODEL, payload, "error", str(exc))
             raise
 
+    @stage_route(default_workflow='revise_chapter')
     def revise_chapter(
         self,
         system_prompt: str,
@@ -486,6 +598,7 @@ class LLMRouter:
             max_tokens=max_tokens,
         )
 
+    @stage_route(default_workflow='summary')
     def summarize_local(self, chapter_text: str) -> str:
         payload = chapter_text
         if self.mode == "mock":
@@ -540,6 +653,7 @@ class LLMRouter:
             )
             return fallback
 
+    @stage_route(default_workflow='check_ai_flavor_local')
     def check_ai_flavor_local(self, chapter_text: str, style_context: str = "") -> str:
         style_context = style_context or self._style_check_context()
         payload = f"{style_context}\n\n{chapter_text}" if style_context else chapter_text
@@ -591,9 +705,11 @@ class LLMRouter:
             return fallback
 
     # Backward-compatible name used by older WebUI code.
+    @stage_route(default_workflow='check_consistency_local')
     def check_consistency_local(self, chapter_text: str) -> str:
         return self.check_ai_flavor_local(chapter_text)
 
+    @stage_route(default_workflow='reader_mirror')
     def reader_mirror(self, chapter_text: str, recent_summary: str = "") -> str:
         """读者镜像：主路径走 CRITIC/DeepSeek，不可用时降级 Ollama 本地。"""
         settings_doc = self._style_check_context()
@@ -681,6 +797,7 @@ class LLMRouter:
                 f"## 待审章节\n{chapter_text}"
             )
 
+    @stage_route(default_workflow='reader_mirror')
     def check_reader_mirror_local(self, chapter_text: str, recent_summary: str = "") -> str:
         """读者镜像 Ollama 本地降级路径。"""
         settings_doc = self._style_check_context()
@@ -718,6 +835,7 @@ class LLMRouter:
             )
             return fallback
 
+    @stage_route(default_workflow='deep_check')
     def deep_check(self, chapter_text: str, recent_summary: str = "") -> str:
         """深度检查：情感冲击 + 主题推进 + 人物弧光，主路径 CRITIC/DeepSeek。"""
         settings_doc = self._style_check_context()
@@ -847,6 +965,7 @@ class LLMRouter:
             "【综合】深度检查为草稿阶段参考；人工朗读标注'最有感觉的段落'和'最想跳过的段落'是最有效的校准。"
         )
 
+    @stage_route(workflow_arg_index=2, default_workflow='assist')
     def assist_text(
         self,
         system_prompt: str,
@@ -1117,6 +1236,10 @@ class LLMRouter:
                 return text
             except Exception as exc:
                 last_exc = exc
+                # gateway timeout / blocked 通常源于上下文过长或 WAF 规则——
+                # 直接跳出走 compact retry，比单纯退避重试更可能成功。
+                if self._is_custom_gateway_timeout(exc) or self._is_custom_blocked_error(exc):
+                    break
                 if attempt < len(backoffs) and self._is_custom_5xx_error(exc):
                     time.sleep(backoffs[attempt])
                     continue

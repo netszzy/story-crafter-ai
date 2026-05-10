@@ -7,7 +7,6 @@ yu qi ci pin lu、fan wen bi li，xiang si du > 70% biao ji jing gao。
 
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter
 from math import sqrt
@@ -17,7 +16,6 @@ from novel_schemas import (
     CharacterVoiceProfile,
     VoiceFingerprint,
     model_to_json,
-    write_json_model,
 )
 
 # “ = "  ” = "

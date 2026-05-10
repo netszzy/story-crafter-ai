@@ -63,7 +63,6 @@ from project_center import (
     collect_linkage_drift_issues,
     collect_story_consistency_warnings,
     ensure_project_center,
-    render_story_consistency_review,
     generate_quality_report,
     generate_writing_tasks,
     run_v1_upgrade,
@@ -84,7 +83,6 @@ from quality_diagnostics import (
 )
 from structured_store import (
     confirm_task_card,
-    build_scene_plan_with_llm,
     read_character_states,
     list_scene_drafts,
     next_scene_draft_version,
@@ -279,7 +277,11 @@ class PipelineHelperTests(unittest.TestCase):
         self.assertEqual(FakeRouter.revise_calls, 1)
         self.assertEqual(FakeRAG.index_calls, 0)
         self.assertTrue((self.root / "04_审核日志" / "第001章_草稿摘要.md").exists())
+        # 戏剧诊断对默认 plot 模式必跑；只有 interior / atmosphere / bridge 模式才跳过。
         self.assertTrue((self.root / "04_审核日志" / "第001章_戏剧诊断.json").exists())
+        # 文学批评和风格法庭无 mode 限制，必跑。
+        self.assertTrue((self.root / "04_审核日志" / "第001章_文学批评.json").exists())
+        self.assertTrue((self.root / "04_审核日志" / "第001章_风格法庭.json").exists())
         self.assertNotIn("auto-chapter-001", (self.root / "03_滚动记忆" / "最近摘要.md").read_text(encoding="utf-8"))
 
     def test_revise_from_feedback_prioritizes_dramatic_diagnostics(self) -> None:
@@ -849,7 +851,9 @@ class QualityDiagnosticsTests(unittest.TestCase):
         self.assertIn("章首抓力偏弱", finding_names)
         self.assertIn("章末余味偏弱", finding_names)
         self.assertGreater(report["metrics"]["exposition_sentence_ratio"], 0.35)
-        self.assertTrue(quality_needs_revision(report))
+        # 新语义：单纯文气/钩子偏弱不再触发自动改稿，避免模型为了过指标妥协质感。
+        # 这里没有 forbidden 命中也没有任务卡核心事件未覆盖，所以不该触发。
+        self.assertFalse(quality_needs_revision(report))
 
     def test_quality_caveat_downgrades_conflict_findings_for_interior_mode(self) -> None:
         (self.root / "01_大纲" / "章纲" / "第001章_task_card.json").write_text(
@@ -2251,7 +2255,8 @@ class WorkflowAdvisorTests(unittest.TestCase):
 
         self.assertEqual(flow["recommendation"]["action"], "assemble_scenes")
 
-    def test_recommendation_runs_deep_reviews_before_quality(self) -> None:
+    def test_recommendation_runs_reader_mirror_before_quality(self) -> None:
+        """精简后：审计 → 读者镜像 → 质量诊断。ai_check / deep_check 已被砍。"""
         outline = "# 第001章：雨夜\n\n## 核心事件\n收到信。"
         (self.root / "01_大纲" / "章纲" / "第001章.md").write_text(outline, encoding="utf-8")
         sync_task_card_from_outline(self.root, 1, outline)
@@ -2263,7 +2268,6 @@ class WorkflowAdvisorTests(unittest.TestCase):
             (scene_dir / f"scene_{scene.scene_number:03d}_draft_v001.md").write_text("场景正文", encoding="utf-8")
         (self.root / "02_正文" / "第001章_草稿.md").write_text("他收到信。", encoding="utf-8")
         (self.root / "04_审核日志" / "第001章_审计.md").write_text("本章未发现明显逻辑问题。", encoding="utf-8")
-        (self.root / "04_审核日志" / "第001章_AI味检查.md").write_text("未发现明显 AI 高频套话。", encoding="utf-8")
 
         flow = chapter_flow(self.root, 1)
 
@@ -2272,14 +2276,77 @@ class WorkflowAdvisorTests(unittest.TestCase):
 
         flow = chapter_flow(self.root, 1)
 
-        self.assertEqual(flow["recommendation"]["action"], "deep_check")
-        (self.root / "04_审核日志" / "第001章_深度检查.md").write_text("人物弧光尚可。", encoding="utf-8")
-
-        flow = chapter_flow(self.root, 1)
-
         self.assertEqual(flow["recommendation"]["action"], "quality_diag")
-        self.assertIn("深审", [step["name"] for step in flow["steps"]])
-        self.assertIn("诊断", [step["name"] for step in flow["steps"]])
+        step_names = [step["name"] for step in flow["steps"]]
+        self.assertIn("读者镜像", step_names)
+        self.assertIn("诊断", step_names)
+        self.assertNotIn("AI味", step_names)
+        self.assertNotIn("深审", step_names)
+
+    def test_recommendation_walks_through_v5_diagnostic_stages(self) -> None:
+        """plot 模式（默认）：质量诊断 → 戏剧诊断 → 文学批评 → 风格法庭 → 声音诊断 → 编辑备忘录。"""
+        outline = "# 第001章：雨夜\n\n## 核心事件\n收到信。"
+        (self.root / "01_大纲" / "章纲" / "第001章.md").write_text(outline, encoding="utf-8")
+        sync_task_card_from_outline(self.root, 1, outline)
+        confirm_task_card(self.root, 1)
+        scenes = sync_scene_plan_from_task_card(self.root, 1)
+        scene_dir = self.root / "02_正文" / "第001章_scenes"
+        scene_dir.mkdir(parents=True)
+        for scene in scenes:
+            (scene_dir / f"scene_{scene.scene_number:03d}_draft_v001.md").write_text("场景正文", encoding="utf-8")
+        (self.root / "02_正文" / "第001章_草稿.md").write_text("他收到信。", encoding="utf-8")
+        for rel in ["审计", "读者镜像", "质量诊断"]:
+            (self.root / "04_审核日志" / f"第001章_{rel}.md").write_text(f"# {rel}", encoding="utf-8")
+        (self.root / "04_审核日志" / "第001章_质量诊断.json").write_text(
+            json.dumps({"score": 92, "findings": []}, ensure_ascii=False), encoding="utf-8",
+        )
+
+        # 1. 质量诊断完成、plot 模式 → 推戏剧诊断
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "drama_diag")
+        (self.root / "04_审核日志" / "第001章_戏剧诊断.md").write_text("# 戏剧诊断", encoding="utf-8")
+        # 2. 戏剧诊断完成 → 推文学批评
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "literary_critic")
+        (self.root / "04_审核日志" / "第001章_文学批评.md").write_text("# 文学批评", encoding="utf-8")
+        # 3. 文学批评完成 → 推风格法庭
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "style_court")
+        (self.root / "04_审核日志" / "第001章_风格法庭.md").write_text("# 风格法庭", encoding="utf-8")
+        # 4. 风格法庭完成 → 推声音诊断
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "voice_diag")
+        (self.root / "04_审核日志" / "第001章_声音诊断.md").write_text("# 声音诊断", encoding="utf-8")
+        # 5. 声音诊断完成 → 推编辑备忘录
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "editor_memo")
+        (self.root / "04_审核日志" / "第001章_编辑备忘录.md").write_text("# 编辑备忘录", encoding="utf-8")
+        # 6. 编辑备忘录完成、无硬伤 → 进入 save_final
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "save_final")
+
+    def test_recommendation_skips_drama_diag_for_interior_chapter(self) -> None:
+        """interior / atmosphere / bridge 模式跳过戏剧诊断，避免量化指标抹平克制氛围。"""
+        outline = "# 第001章：雨夜\n\n## 核心事件\n他坐着没动。"
+        (self.root / "01_大纲" / "章纲" / "第001章.md").write_text(outline, encoding="utf-8")
+        sync_task_card_from_outline(self.root, 1, outline)
+        confirm_task_card(self.root, 1)
+        # 把任务卡 chapter_mode 改为 interior
+        card_path = self.root / "01_大纲" / "章纲" / "第001章_task_card.json"
+        card_data = json.loads(card_path.read_text(encoding="utf-8"))
+        card_data["chapter_mode"] = "interior"
+        card_path.write_text(json.dumps(card_data, ensure_ascii=False), encoding="utf-8")
+        scenes = sync_scene_plan_from_task_card(self.root, 1)
+        scene_dir = self.root / "02_正文" / "第001章_scenes"
+        scene_dir.mkdir(parents=True)
+        for scene in scenes:
+            (scene_dir / f"scene_{scene.scene_number:03d}_draft_v001.md").write_text("场景正文", encoding="utf-8")
+        (self.root / "02_正文" / "第001章_草稿.md").write_text("他坐着没动。", encoding="utf-8")
+        for rel in ["审计", "读者镜像", "质量诊断"]:
+            (self.root / "04_审核日志" / f"第001章_{rel}.md").write_text(f"# {rel}", encoding="utf-8")
+        (self.root / "04_审核日志" / "第001章_质量诊断.json").write_text(
+            json.dumps({"score": 92, "findings": []}, ensure_ascii=False), encoding="utf-8",
+        )
+
+        # interior 模式下：质量诊断完成 → 跳过 drama_diag，直接推 literary_critic
+        self.assertEqual(chapter_flow(self.root, 1)["recommendation"]["action"], "literary_critic")
+        # 步骤条里"戏剧"应该显示为已完成（其实是被模式跳过）
+        steps = {step["name"]: step["done"] for step in chapter_flow(self.root, 1)["steps"]}
+        self.assertTrue(steps.get("戏剧"))
 
     def test_recommendation_uses_quality_report_to_revise(self) -> None:
         outline = "# 第001章：雨夜\n\n## 核心事件\n收到信。"
@@ -2292,13 +2359,20 @@ class WorkflowAdvisorTests(unittest.TestCase):
         for scene in scenes:
             (scene_dir / f"scene_{scene.scene_number:03d}_draft_v001.md").write_text("场景正文", encoding="utf-8")
         (self.root / "02_正文" / "第001章_草稿.md").write_text("他收到信。", encoding="utf-8")
-        (self.root / "04_审核日志" / "第001章_审计.md").write_text("本章未发现明显逻辑问题。", encoding="utf-8")
-        (self.root / "04_审核日志" / "第001章_AI味检查.md").write_text("未发现明显 AI 高频套话。", encoding="utf-8")
-        (self.root / "04_审核日志" / "第001章_读者镜像.md").write_text("章末追看欲偏弱。", encoding="utf-8")
-        (self.root / "04_审核日志" / "第001章_深度检查.md").write_text("情感冲击偏弱。", encoding="utf-8")
-        (self.root / "04_审核日志" / "第001章_质量诊断.md").write_text("# 质量诊断", encoding="utf-8")
+        # 全部诊断环节都需要完成，AI 推进才会进入 feedback_revise
+        for rel in [
+            "审计", "AI味检查", "读者镜像", "深度检查",
+            "质量诊断", "戏剧诊断", "文学批评", "风格法庭", "声音诊断", "编辑备忘录",
+        ]:
+            (self.root / "04_审核日志" / f"第001章_{rel}.md").write_text(f"# {rel}", encoding="utf-8")
+        # 新语义：只有"硬伤"（forbidden 命中 / 任务卡核心未覆盖 / error 级）才推 feedback_revise，
+        # 单纯低分或品味问题不再触发——避免模型为指标妥协人味。
         (self.root / "04_审核日志" / "第001章_质量诊断.json").write_text(
-            json.dumps({"score": 60, "findings": [{"item": "章末钩子偏弱", "level": "warning"}]}, ensure_ascii=False),
+            json.dumps({
+                "score": 60,
+                "findings": [{"item": "触碰任务卡禁止事项", "level": "error", "detail": "提前揭露真相。"}],
+                "task_card_alignment": {"forbidden_hits": ["提前揭露真相"]},
+            }, ensure_ascii=False),
             encoding="utf-8",
         )
 

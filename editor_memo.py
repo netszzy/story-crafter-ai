@@ -1,7 +1,7 @@
 """
-V4.0 编辑备忘录合成器。
+V5.0 编辑备忘录合成器。
 
-把 6 项独立诊断（戏剧/质量/审计/AI味/读者镜像/深度检查）合成为一份
+把多项独立诊断（戏剧/质量/审计/读者镜像/文学批评/风格法庭）合成为一份
 聚焦的「编辑备忘录」，去重、排序、标矛盾、给执行指令。
 """
 
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +22,6 @@ from novel_schemas import (
     MemoItem,
     StyleCourtDecision,
     model_to_json,
-    write_json_model,
 )
 from style_court import _is_mock_caveat
 
@@ -33,9 +31,7 @@ DEFAULT_LABELS = {
     "drama": "戏剧",
     "quality": "质量",
     "audit": "审计",
-    "ai_flavor": "AI味",
     "reader": "读者",
-    "deep": "深度",
 }
 LITERARY_PROTECTION_TERMS = [
     "冲突", "主动性", "agency", "身体", "身体情绪", "动作", "行动", "压力", "代价", "选择",
@@ -49,9 +45,7 @@ def synthesize_memo(
     chapter_text: str,
     *,
     audit_text: str = "",
-    ai_flavor_text: str = "",
     reader_mirror_text: str = "",
-    deep_check_text: str = "",
     quality_report: dict[str, Any] | None = None,
     drama_diag: DramaticDiagnostics | None = None,
     literary_view: LiteraryView | None = None,
@@ -81,13 +75,12 @@ def synthesize_memo(
             reservations=meta.get("reservations", []),
             literary_view=literary_view,
             style_court_decision=style_court_decision,
-            deep_check_text=deep_check_text,
         )
 
     system_prompt = _build_system_prompt(project_dir)
     user_msg = _build_user_msg(
-        chapter_text, audit_text, ai_flavor_text,
-        reader_mirror_text, deep_check_text, quality_report, drama_diag, meta,
+        chapter_text, audit_text,
+        reader_mirror_text, quality_report, drama_diag, meta,
         literary_view=literary_view, style_court_decision=style_court_decision,
     )
 
@@ -101,7 +94,6 @@ def synthesize_memo(
     return _parse_memo_response(
         raw, chapter_num, llm, quality_report, drama_diag, audit_text, meta,
         literary_view=literary_view, style_court_decision=style_court_decision,
-        deep_check_text=deep_check_text,
     )
 
 
@@ -173,6 +165,10 @@ def memo_to_revision_prompt(memo: EditorMemo) -> str:
         "### 改稿约束",
         "- 不改核心剧情，不新增与项目轴冲突的新事实。",
         "- 优先修复 P0 项，P1/P2 项尽量修复但不以破坏节奏为代价。",
+        "- 原文中的留白、停顿、未说完的话、未解状态必须保留——不要为了'让段落完整'而补全，"
+        "不要为了'让信息更清楚'而展开解释。",
+        "- 不要为了过冲突信号、主动性、感官词等指标而强行加冲突词、动作或形容词。",
+        "- 只动备忘录点名的局部，其他段落原样保留。",
     ])
     return "\n".join(lines).strip()
 
@@ -192,9 +188,7 @@ def _build_system_prompt(project_dir: Path) -> str:
 def _build_user_msg(
     chapter_text: str,
     audit_text: str,
-    ai_flavor_text: str,
     reader_mirror_text: str,
-    deep_check_text: str,
     quality_report: dict[str, Any] | None,
     drama_diag: DramaticDiagnostics | None,
     meta: dict[str, Any] | None = None,
@@ -284,25 +278,18 @@ def _build_user_msg(
             f"### literary_priorities\n{priorities}"
         )
 
-    for label, text in [
-        ("逻辑审计", audit_text),
-        ("AI 味检查", ai_flavor_text),
-        ("读者镜像", reader_mirror_text),
-    ]:
-        if text.strip():
-            excerpt = text[:800] + ("..." if len(text) > 800 else "")
-            blocks.append(f"## {label}\n{excerpt}")
+    if audit_text.strip():
+        excerpt = audit_text[:800] + ("..." if len(audit_text) > 800 else "")
+        blocks.append(f"## 逻辑审计\n{excerpt}")
 
-    if deep_check_text.strip():
-        summary_line = _extract_deep_check_summary(deep_check_text)
-        excerpt = deep_check_text[:800] + ("..." if len(deep_check_text) > 800 else "")
-        deep_block = f"## 深度检查\n{excerpt}"
-        if summary_line:
-            deep_block += (
-                "\n\n**【综合判断 - 必须摘录到 overall_assessment】**："
-                f"{summary_line}"
-            )
-        blocks.append(deep_block)
+    if reader_mirror_text.strip():
+        excerpt = reader_mirror_text[:800] + ("..." if len(reader_mirror_text) > 800 else "")
+        # 读者镜像降级为参考层：可作为风格法庭的输入参考，但不得直接生成 P0 必改项。
+        blocks.append(
+            "## 读者镜像（参考层）\n"
+            "> 仅作风格法庭的参考输入，不得直接产生 top_3_must_fix；除非和 confirmed_issues 重合，否则进入 reservations。\n\n"
+            f"{excerpt}"
+        )
 
     return "\n\n".join(blocks)
 
@@ -317,7 +304,6 @@ def _parse_memo_response(
     meta: dict[str, Any] | None = None,
     literary_view: LiteraryView | None = None,
     style_court_decision: StyleCourtDecision | None = None,
-    deep_check_text: str = "",
 ) -> EditorMemo:
     meta = meta or {}
     try:
@@ -348,25 +334,7 @@ def _parse_memo_response(
             reservations=meta.get("reservations", []),
             literary_view=literary_view,
             style_court_decision=style_court_decision,
-            deep_check_text=deep_check_text,
         )
-
-
-def _extract_deep_check_summary(text: str) -> str:
-    """从深度检查文本里抽取【综合】那一行（去掉项目符号和【综合】前缀）。"""
-    if not text:
-        return ""
-    for line in text.splitlines():
-        stripped = line.strip().lstrip("-*•").strip()
-        if stripped.startswith("【综合】"):
-            return stripped[len("【综合】"):].strip()
-    return ""
-
-
-_DEEP_CHECK_CONCERN_KEYWORDS = (
-    "还差", "稀释", "不够", "缺失", "勉强", "未到", "未能", "尚需", "再差",
-    "薄弱", "不足", "欠缺", "失控", "断裂", "突兀",
-)
 
 
 def _fallback_memo(
@@ -379,7 +347,6 @@ def _fallback_memo(
     reservations: list[dict[str, Any]] | None = None,
     literary_view: LiteraryView | None = None,
     style_court_decision: StyleCourtDecision | None = None,
-    deep_check_text: str = "",
 ) -> EditorMemo:
     """零 API 成本降级：从各诊断抽取 top 问题合并。"""
     items: list[MemoItem] = []
@@ -440,17 +407,6 @@ def _fallback_memo(
                 ))
                 break
 
-    # 从深度检查取【综合】判断：含 concern 关键词时升级为 P1
-    deep_summary_line = _extract_deep_check_summary(deep_check_text)
-    if deep_summary_line and any(kw in deep_summary_line for kw in _DEEP_CHECK_CONCERN_KEYWORDS):
-        if not _protected_by_literary_context(deep_summary_line, literary_view, style_court_decision):
-            items.append(MemoItem(
-                priority="P1",
-                source="deep",
-                issue=f"深度检查指出：{deep_summary_line[:80]}",
-                action=deep_summary_line,
-            ))
-
     # 去重排序：按 priority 排序
     prio_order = {"P0": 0, "P1": 1, "P2": 2}
     seen = set()
@@ -474,8 +430,6 @@ def _fallback_memo(
 
     ready = len(unique) == 0 or all(i.priority != "P0" for i in unique)
     overall = "[Mock] " + ("质量整体较好，少量优化后即可定稿。" if ready else "有必改项需要处理后再定稿。")
-    if deep_summary_line:
-        overall = f"{overall} 深度检查：{deep_summary_line[:120]}"
 
     return EditorMemo(
         chapter_number=chapter_num,

@@ -860,6 +860,10 @@ def generate_chapter_outline_draft(project_dir: Path, chapter_num: int, brief: s
         "chapter_outline",
         f"第{chapter_num:03d}章当前章纲",
     )
+    
+    from long_structure import active_volume_block
+    active_vol_text = active_volume_block(project_dir, chapter_num)
+    
     user_prompt = render_template(
         template,
         {
@@ -873,6 +877,10 @@ def generate_chapter_outline_draft(project_dir: Path, chapter_num: int, brief: s
         },
     )
     user_prompt = add_project_linkage(project_dir, user_prompt, "chapter")
+    
+    if active_vol_text:
+        user_prompt += f"\n\n## 必须遵循的当前卷约束\n\n注意：你现在正在为第 {chapter_num:03d} 章编写章纲，必须严格在这个卷纲的范围内发展剧情，绝对不能串台到其他卷。\n\n{active_vol_text}"
+
     content = router.assist_text(
         "你是长篇中文小说章节策划，擅长把总纲拆成可写、可审、可追踪的章纲。",
         user_prompt,
